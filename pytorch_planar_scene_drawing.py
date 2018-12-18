@@ -54,7 +54,6 @@ def draw_sprites_at_poses(pose, sprite_size_x, sprite_size_y,
     n = sprites.size(0)
     n_channels = sprites.size(1)
     assert sprites.dim() == 4
-    print sprites.size()
     assert sprites.size(2) == sprite_size_x, 'Sprite input size x mismatch.'
     assert sprites.size(3) == sprite_size_y, 'Sprite input size y mismatch.'
 
