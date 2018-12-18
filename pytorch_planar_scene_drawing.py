@@ -6,12 +6,6 @@ import torch.nn.functional as F
 
 device = torch.device('cpu')
 
-'''
-Use Spatial Transformer Network strategy from the
-Pyro AIR tutorial to construct a differentiable
-drawing system.
-'''
-
 
 def convert_pose_to_matrix(pose):
     '''
@@ -52,6 +46,9 @@ def draw_sprites_at_poses(pose, sprite_size_x, sprite_size_y,
 
     Poses are defined as offsets from the image center, in pixels,
     and angle, in theta: [x, y, theta]
+
+    Uses Spatial Transformer Network, heavily referencing the Pyro AIR
+    tutorial.
     '''
 
     n = sprites.size(0)

@@ -31,6 +31,13 @@ some trappings to do image processing to get down to a picture of the
 current picture frame), takes exactly those inputs.
 
 
+## Overview / Notes
+
+`pytorch_planar_scene_drawing.py` contains basic utilities for building up images
+from subparts (sprites).
+
+
+
 ## Some references
 
 [Deepmind SPIRAL](https://deepmind.com/documents/183/SPIRAL.pdf) tackles
