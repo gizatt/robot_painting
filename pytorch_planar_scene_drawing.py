@@ -1,96 +1,139 @@
+import imageio
+import numpy as np
+import os
 import torch
 import torch.nn.functional as F
-import pyro
 
 device = torch.device('cpu')
 
-# Use Spatial Transformer Network strategy from the 
-# Pyro AIR tutorial to construct a differentiable
-# drawing system.
+'''
+Use Spatial Transformer Network strategy from the
+Pyro AIR tutorial to construct a differentiable
+drawing system.
+'''
 
-expansion_indices = torch.LongTensor([0, 1, 2, 3, 4, 5])
+
 def convert_pose_to_matrix(pose):
-    # Converts a [x, y, theta] pose to a tf matrix:
-    # [[cos(theta) -sin(theta) x]]
-    #  [sin(theta) cos(theta)  y]]
-    # (except in vectorized form -- so input is n x 3,
-    #  output is n x 2 x 3)
+    '''
+     Converts a batch of [x, y, theta] poses
+     to a tf matrix:
+     [[cos(theta) -sin(theta) x]]
+      [sin(theta) cos(theta)  y]]
+     Input is n x 3, output is n x 2 x 3.
+    '''
     n = pose.size(0)
     out = torch.cat((torch.cos(pose[:, 2]).view(n, -1),
-    				 -torch.sin(pose[:, 2]).view(n, -1),
-    				 pose[:, 0].view(n, -1),
-    				 torch.sin(pose[:, 2]).view(n, -1),
-    				 torch.cos(pose[:, 2]).view(n, -1),
-    				 pose[:, 1].view(n, -1)), 1)
+                     -torch.sin(pose[:, 2]).view(n, -1),
+                     pose[:, 0].view(n, -1),
+                     torch.sin(pose[:, 2]).view(n, -1),
+                     torch.cos(pose[:, 2]).view(n, -1),
+                     pose[:, 1].view(n, -1)), 1)
     out = out.view(n, 2, 3)
     return out
 
-def draw_sprites_at_poses(pose, sprite_size_x, sprite_size_y, image_size_x, image_size_y, sprites):
+
+def invert_tf_matrix(tf):
+    ''' Inverts a nx2x3 affine TF matrix. '''
+    new_tf = torch.empty(tf.shape, dtype=tf.dtype)
+    new_tf[:, 0:2, 0:2] = tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2)
+    new_tf[:, :, 2] = -1.*torch.bmm(
+        new_tf[:, 0:2, 0:2],
+        tf[:, 0:2, 2].unsqueeze(2)).squeeze(2)
+    return new_tf
+
+
+def draw_sprites_at_poses(pose, sprite_size_x, sprite_size_y,
+                          image_size_x, image_size_y, sprites):
+    '''
+    Given a batch of poses (n x 3), a shared sprite + output image size,
+    and a batch of sprites (n x n_channels x sprite_size_x x sprite_size_y),
+    returns a n x image_size_x x image_size_y batch of images from
+    rendering those sprites at those locations.
+
+    Poses are defined as offsets from the image center, in pixels,
+    and angle, in theta: [x, y, theta]
+    '''
+
     n = sprites.size(0)
-    assert sprites.size(1) == sprite_size_x * sprite_size_y, 'Size mismatch.'
+    n_channels = sprites.size(1)
+    assert sprites.dim() == 4
+    print sprites.size()
+    assert sprites.size(2) == sprite_size_x, 'Sprite input size x mismatch.'
+    assert sprites.size(3) == sprite_size_y, 'Sprite input size y mismatch.'
+
     tf = convert_pose_to_matrix(pose)
+    tf = invert_tf_matrix(tf)
 
-    # Modify the TF to shrink the sprite by sprite_size / image_size,
-    # and offset it so that pose [0, 0] puts it at the top left of the image.
+    # Scale down the offset to move by pixel rather than
+    # by a factor of the half image size
+    # (A movement of "+1" moves the sprite by image_size/2 in the given
+    # dimension).
+    tf[:, 0, 2] /= float(sprite_size_x)
+    tf[:, 1, 2] /= float(sprite_size_y)
+    # And scale the whole transformation by the ratio of sprite to image
+    # ratio -- the default affine_grid will fill the output image
+    # with the input image.
+    tf[:, 0, 0:2] /= (float(sprite_size_x)/float(image_size_x))
+    tf[:, 1, 0:2] /= (float(sprite_size_y)/float(image_size_y))
 
-    # The coordinate system for grid_sample puts -1, -1 at the top left,
-    # and 0, 0 at the middle. Awkward...
+    grid = F.affine_grid(tf, torch.Size((n, n_channels, image_size_x, image_size_y)))
+    out = F.grid_sample(sprites.view(n, n_channels, sprite_size_x, sprite_size_y), grid,
+                        padding_mode="zeros", mode="nearest")
+    return out.view(n, n_channels, image_size_x, image_size_y)
 
-    # what the fuck, why am I such an idiot
-    # this should be totally trivial
-    # and I don't even *need* or care about rotations, or even subimages,
-    # for anything other than foveation so my method can scale to arbitrarily
-    # large images.
-    # All I need to care about is cropping and how effects apply to small subimages.
-    # Nuke this and restart from AIR's version, being more careful about how they
-    # handle scaling.
 
-    x_scaling = float(sprite_size_x) / image_size_x
-    y_scaling = float(sprite_size_y) / image_size_y
-    # Scale the sprite down...
-    # this is *reversed* as the image coordinate in the sprite is
-    # multiplied by this TF to get the image coordinate in the
-    # complete image.
-    tf[:, 0, 0] /= x_scaling
-    tf[:, 1, 0] /= x_scaling
-    tf[:, 0, 1] /= y_scaling
-    tf[:, 1, 1] /= y_scaling
-    
-    grid = F.affine_grid(tf, torch.Size((n, 1, image_size_x, image_size_y)))
-    out = F.grid_sample(sprites.view(n, 1, sprite_size_x, sprite_size_y), grid)
-    return out.view(n, image_size_x, image_size_y)
+def numpy_images_to_torch(images):
+    # Torch generally wants ordering [channels, x, y]
+    # while numpy as has [x, y, channels]
+    return torch.stack([torch.Tensor(sprite_1).permute(2, 0, 1),
+                        torch.Tensor(sprite_2).permute(2, 0, 1)], dim=0)
+
+
+def torch_images_to_numpy(images):
+    assert images.dim() == 4, \
+           "Images must be batched n x channels x x_dim x y_dim"
+    images_out = []
+    for k in range(images.shape[0]):
+        images_out.append(
+            images[k, ...].permute(1, 2, 0).cpu().detach().numpy())
+    return images_out
+
 
 if __name__ == "__main__":
     poses = torch.FloatTensor([[0., 1., 2.],
-                           [1.57, 4., 5.]]).view(2, -1)
+                               [1.57, 4., 5.]]).view(2, -1)
     print "Poses: ", poses
     print "Pose matrix: ", convert_pose_to_matrix(poses)
-
 
     # Test out by generating some sprites and drawing them into a larger image.
     import cv2
     import numpy as np
     import matplotlib.pyplot as plt
-    sprite_size_x = 100
-    sprite_size_y = 100
-    sprite_1 = np.random.random([sprite_size_x, sprite_size_y])
-    sprite_2 = np.random.random([sprite_size_x, sprite_size_y])
 
-    image_size_x = 500
-    image_size_y = 500
-    image_pre = torch.Tensor(np.zeros((image_size_x, image_size_y)))
-    print torch.stack
+    demo_image = "data/kara.png"
+    if os.path.isfile(demo_image):
+        sprite_1 = imageio.imread("data/kara.png").astype(np.float)/256.
+        sprite_2 = imageio.imread("data/kara.png").astype(np.float)/256.
+        sprite_size_x, sprite_size_y, n_channels = sprite_1.shape
+    else:
+        sprite_size_x = 100
+        sprite_size_y = 100
+        n_channels = 1
+        sprite_1 = np.ones([sprite_size_x, sprite_size_y, n_channels])
+        sprite_2 = np.ones([sprite_size_x, sprite_size_y, n_channels])
+
+    image_size_x = 1000
+    image_size_y = 1000
+    image_pre = torch.zeros(1, n_channels, image_size_x, image_size_y)
+    print image_pre.shape
     images_post = draw_sprites_at_poses(
-          torch.stack([torch.Tensor(torch.Tensor([0.3, 0, -np.pi/2.])),
-                     torch.Tensor(torch.Tensor([0, 0, np.pi/4]))]),
+          torch.stack([torch.Tensor(torch.Tensor([50.0, 100.0, np.pi/4.])),
+                       torch.Tensor(torch.Tensor([100, 100, np.pi/2]))]),
           sprite_size_x, sprite_size_y,
           image_size_x, image_size_y,
-          torch.stack([torch.Tensor(sprite_1).view(-1, 1),
-                      torch.Tensor(sprite_2).view(-1, 1)]))
+          numpy_images_to_torch([sprite_1, sprite_2]))
 
+    image = torch_images_to_numpy(image_pre + images_post.sum(dim=0))[0]
 
-    print images_post.shape
-    image = (image_pre + images_post.sum(dim=0)).cpu().detach().numpy()
-    print image, np.max(image)
     plt.imshow(image)
     plt.show()
