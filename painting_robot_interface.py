@@ -53,7 +53,7 @@ class PainterRobotLiftAndMoveInput(PainterRobotInput):
 
     '''
     def __init__(self, destination):
-        self.destination
+        self.destination = destination
 
     def apply(self, t, state):
         state.tip_position = self.destination

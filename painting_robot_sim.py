@@ -27,9 +27,9 @@ device = torch.device('cpu')
 
 sim_color_options = {
     "clean": torch.tensor([0.0, 0.0, 0.0]),
-    "red": torch.tensor([1.0, 0.0, 0.0]),
-    "blue": torch.tensor([0.0, 1.0, 0.0]),
-    "green": torch.tensor([0.0, 0.0, 1.0])
+    "red": torch.tensor([0.1, 1.0, 1.0]),
+    "green": torch.tensor([1.0, 0.1, 1.0]),
+    "blue": torch.tensor([1.0, 1.0, 0.1])
 }
 
 
@@ -46,8 +46,8 @@ def draw_circle_into_array(image, row, col, radius, color, copy=False):
         ret_image = image.copy()
     else:
         ret_image = image
-    for k in range(3):
-        ret_image[rr, cc, k] = color[k]
+    for k, c in enumerate(color):
+        ret_image[rr, cc, k] = c
     return ret_image
 
 
@@ -71,30 +71,34 @@ def secret_painting_process_model(
     dt = t - sim_state.last_t
 
     if isinstance(painter_input, PainterRobotLocalMoveInput):
-        # Build a sprite representing the application of that input.
+        # Build a sprite representing the application of that input
+        # as a subtractive input. First build up an intensity map
+        # of application...
         local_effect_area_size = 100
-        sprite = np.zeros((local_effect_area_size, local_effect_area_size, 3))
+        sprite = np.zeros((local_effect_area_size, local_effect_area_size, 1))
         step_size = 1.
         for k in np.arange(0., painter_input.move_amount, step_size):
             sprite += draw_circle_into_array(
                 sprite*0, 
                 local_effect_area_size/2 + k*painter_input.move_direction[1],
                 local_effect_area_size/2 + k*painter_input.move_direction[0],
-                painter_input.tip_force*10 + np.random.randn(1)*2,
-                sim_color_options[painter_state.last_color].numpy()*(1.0 - np.abs(np.random.randn(3))*0.1),
+                10 + np.random.randn(1)*2,
+                [painter_input.tip_force*(1.0 - np.abs(np.random.randn()*0.1))],
                 copy=False) * new_sim_state.paint_on_brush
             new_sim_state.paint_on_brush *= 0.99
         sprite = np.clip(sprite, 0., 1.)
         # add some streaks
-        burn_mask = np.abs(np.random.randn(25, 25))*0.025
+        burn_mask = np.abs(np.random.randn(25, 25))*0.015
         burn_mask = cv2.resize(burn_mask, dsize=(local_effect_area_size, local_effect_area_size), interpolation=cv2.INTER_NEAREST)
         for k in np.arange(0., painter_input.move_amount, step_size):
-            sprite -= np.tile(np.expand_dims(scipy.ndimage.affine_transform(
+            sprite[:, :, 0] -= scipy.ndimage.affine_transform(
                 burn_mask, np.array([[1., 0., k*painter_input.move_direction[1]],
                                      [0., 1., k*painter_input.move_direction[0]]]),
-                mode="wrap"), -1), [1, 1, 3])
+                mode="wrap")
 
         sprite = np.clip(sprite, 0., 1.)
+        # Subtract as much color as that intensity allows
+        sprite = np.tile(sprite, [1, 1, 3]) * sim_color_options[new_painter_state.last_color].numpy()
         sprite = numpy_images_to_torch([sprite]).type(current_image.dtype)
 
         # Remove some paint from the brush
@@ -104,7 +108,7 @@ def secret_painting_process_model(
                  0.]
             ).unsqueeze(0)
 
-        new_image = new_image + \
+        new_image = new_image - \
             draw_sprites_at_poses(
                 sprite_pose, local_effect_area_size, local_effect_area_size,
                 new_image.shape[1], new_image.shape[2],
@@ -124,7 +128,8 @@ def secret_painting_process_model(
 if __name__ == "__main__":
     canvas_x = 640
     canvas_y = 480
-    current_image = torch.zeros(3, canvas_x, canvas_y)
+    # Initialize to 1s since we're using subtractive color
+    current_image = torch.ones(3, canvas_x, canvas_y)
     current_painter_state = PainterRobotState(
         tip_position=torch.Tensor([0, 0]),
         last_color="none",
@@ -134,16 +139,24 @@ if __name__ == "__main__":
     current_sim_state = SimState()
 
     last_got_paint_time = -100
-    get_paint_input = PainterRobotGetPaintInput("red")
-
+    theta = np.random.random()*2.*np.pi
+    last_moved_time = -100
+    
     plt.figure()
-    while (t < 5.):
+    while (t < 10.):
         if (t - last_got_paint_time > 1.0):
-            painter_input = get_paint_input
+            painter_input = PainterRobotGetPaintInput(["red", "blue", "green"][np.random.randint(3)])
             last_got_paint_time = t
+        elif (t - last_moved_time > 1.0):
+            painter_input = PainterRobotLiftAndMoveInput(
+                torch.tensor([np.random.randn()*canvas_x/2.,
+                              np.random.randn()*canvas_y/2.]))
+            theta = np.random.random()*2.*np.pi
+            last_moved_time = t
         else:
+            theta += np.random.randn(1)[0]*0.5
             painter_input = PainterRobotLocalMoveInput(
-                move_direction=torch.Tensor([np.cos(t), np.sin(t)]),
+                move_direction=torch.Tensor([np.cos(theta), np.sin(theta)]),
                 move_amount=25,
                 tip_force=1.)
 
