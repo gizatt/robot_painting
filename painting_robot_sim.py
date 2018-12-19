@@ -5,6 +5,9 @@ import numpy as np
 import os
 import torch
 import torch.nn.functional as F
+import skimage
+import scipy.ndimage
+import cv2
 
 from painting_robot_interface import (
     PainterRobotLocalMoveInput,
@@ -15,7 +18,8 @@ from painting_robot_interface import (
 )
 from pytorch_planar_scene_drawing import (
     draw_sprites_at_poses,
-    torch_images_to_numpy
+    torch_images_to_numpy,
+    numpy_images_to_torch
 )
 
 device = torch.device('cpu')
@@ -33,6 +37,18 @@ class SimState():
     def __init__(self):
         self.paint_on_brush = 0
         self.last_t = 0
+
+
+def draw_circle_into_array(image, row, col, radius, color, copy=False):
+    rr, cc = skimage.draw.circle(int(np.round(row)), int(np.round(col)),
+                                 int(np.round(radius)), image.shape)
+    if copy:
+        ret_image = image.copy()
+    else:
+        ret_image = image
+    for k in range(3):
+        ret_image[rr, cc, k] = color[k]
+    return ret_image
 
 
 def secret_painting_process_model(
@@ -56,32 +72,43 @@ def secret_painting_process_model(
 
     if isinstance(painter_input, PainterRobotLocalMoveInput):
         # Build a sprite representing the application of that input.
-        local_effect_area_size = 25
-        sprite = torch.zeros(3, local_effect_area_size, local_effect_area_size)
-        # Fill it with the color, degraded by how far we've dragged
-        # (this is a very box brush...)
-        sprite[:, :, :] = (sim_color_options[painter_state.last_color]
-                           .view(-1, 1, 1).expand_as(sprite)
-                           * sim_state.paint_on_brush)
+        local_effect_area_size = 100
+        sprite = np.zeros((local_effect_area_size, local_effect_area_size, 3))
+        step_size = 1.
+        for k in np.arange(0., painter_input.move_amount, step_size):
+            sprite += draw_circle_into_array(
+                sprite*0, 
+                local_effect_area_size/2 + k*painter_input.move_direction[1],
+                local_effect_area_size/2 + k*painter_input.move_direction[0],
+                painter_input.tip_force*10 + np.random.randn(1)*2,
+                sim_color_options[painter_state.last_color].numpy()*(1.0 - np.abs(np.random.randn(3))*0.1),
+                copy=False) * new_sim_state.paint_on_brush
+            new_sim_state.paint_on_brush *= 0.99
+        sprite = np.clip(sprite, 0., 1.)
+        # add some streaks
+        burn_mask = np.abs(np.random.randn(25, 25))*0.025
+        burn_mask = cv2.resize(burn_mask, dsize=(local_effect_area_size, local_effect_area_size), interpolation=cv2.INTER_NEAREST)
+        for k in np.arange(0., painter_input.move_amount, step_size):
+            sprite -= np.tile(np.expand_dims(scipy.ndimage.affine_transform(
+                burn_mask, np.array([[1., 0., k*painter_input.move_direction[1]],
+                                     [0., 1., k*painter_input.move_direction[0]]]),
+                mode="wrap"), -1), [1, 1, 3])
+
+        sprite = np.clip(sprite, 0., 1.)
+        sprite = numpy_images_to_torch([sprite]).type(current_image.dtype)
+
         # Remove some paint from the brush
-        new_sim_state.paint_on_brush = max(
-            0., new_sim_state.paint_on_brush - 0.01*painter_input.move_amount)
-        theta = torch.atan2(painter_input.move_direction[1],
-                            painter_input.move_direction[0])
         sprite_pose = torch.tensor(
                 [new_painter_state.tip_position[0],
                  new_painter_state.tip_position[1],
-                 theta]
+                 0.]
             ).unsqueeze(0)
 
-        inc = draw_sprites_at_poses(
-                sprite_pose, local_effect_area_size, local_effect_area_size,
-                new_image.shape[1], new_image.shape[2], sprite.unsqueeze(0))
         new_image = new_image + \
             draw_sprites_at_poses(
                 sprite_pose, local_effect_area_size, local_effect_area_size,
                 new_image.shape[1], new_image.shape[2],
-                sprite.unsqueeze(0))[0, ...]
+                sprite)[0, ...]
         new_painter_state.tip_position += (
             painter_input.move_amount*painter_input.move_direction)
     else:
@@ -95,8 +122,8 @@ def secret_painting_process_model(
 
 
 if __name__ == "__main__":
-    canvas_x = 1000
-    canvas_y = 1000
+    canvas_x = 640
+    canvas_y = 480
     current_image = torch.zeros(3, canvas_x, canvas_y)
     current_painter_state = PainterRobotState(
         tip_position=torch.Tensor([0, 0]),

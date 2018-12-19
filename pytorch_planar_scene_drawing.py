@@ -81,8 +81,8 @@ def draw_sprites_at_poses(pose, sprite_size_x, sprite_size_y,
 def numpy_images_to_torch(images):
     # Torch generally wants ordering [channels, x, y]
     # while numpy as has [x, y, channels]
-    return torch.stack([torch.Tensor(sprite_1).permute(2, 0, 1),
-                        torch.Tensor(sprite_2).permute(2, 0, 1)], dim=0)
+    return torch.stack([torch.Tensor(image).permute(2, 0, 1) 
+                        for image in images], dim=0)
 
 
 def torch_images_to_numpy(images):
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     else:
         sprite_size_x = 100
         sprite_size_y = 100
-        n_channels = 1
+        n_channels = 3
         sprite_1 = np.ones([sprite_size_x, sprite_size_y, n_channels])
         sprite_2 = np.ones([sprite_size_x, sprite_size_y, n_channels])
 
