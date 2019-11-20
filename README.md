@@ -5,13 +5,13 @@ Ultimately, I want to make my robot paint pictures. Having my computer paint the
 ## Approach / TODOs:
 
 Roughly ordered digital painting todos:
-    - Write a very simple differentiable painting program, following the oil model that I really like used in [this work](https://github.com/ctmakro/opencv_playground).
-    - Attempt to reproduce the results in that repo (e.g. try random rollouts of brushstrokes and accept the best ones). Maybe inject some gradient descent.
-    - Play with different losses -- e.g. a GAN loss, a style transfer loss.
-    - Try to write an N-step MPC to try to paint target images. May need significant neural components. (Calculating cost, so MPC knows what to go downhill on: to start with, discretize the colors of the target image to their nearest neighbors in the color set, and then measure pixelwise error. An alternative could be to learn an encoding of all paintings with a VAE, and map the partial image and target image into that feature space, and take distance there, and take actions to decrease that distance. Might be cool as an extension.)
+  - Write a very simple differentiable painting program, following the oil model that I really like used in [this work](https://github.com/ctmakro/opencv_playground).
+  - Attempt to reproduce the results in that repo (e.g. try random rollouts of brushstrokes and accept the best ones). Maybe inject some gradient descent.
+  - Play with different losses -- e.g. a GAN loss, a style transfer loss.
+  - Try to write an N-step MPC to try to paint target images. May need significant neural components. (Calculating cost, so MPC knows what to go downhill on: to start with, discretize the colors of the target image to their nearest neighbors in the color set, and then measure pixelwise error. An alternative could be to learn an encoding of all paintings with a VAE, and map the partial image and target image into that feature space, and take distance there, and take actions to decrease that distance. Might be cool as an extension.)
 
 Roughly ordered robot painting todos:
-    - Architect a more robot-like stroke controller and stroke model, and find a way to fit it to data. (Possible target "action" description: put brush down at a given coordinate (x, y, in image coordinates) with a given color (indexed into a preprogrammed color set) and a given force. Move it, with linear interp in x, y, and force, to a  another location (at a fixed a-priori tip speed)? Seems insufficiently expressive. Mixed continuous-discrete with velocity control but also brush lifting / setting feels better...)
+  - Architect a more robot-like stroke controller and stroke model, and find a way to fit it to data. (Possible target "action" description: put brush down at a given coordinate (x, y, in image coordinates) with a given color (indexed into a preprogrammed color set) and a given force. Move it, with linear interp in x, y, and force, to a  another location (at a fixed a-priori tip speed)? Seems insufficiently expressive. Mixed continuous-discrete with velocity control but also brush lifting / setting feels better...)
 
 ## Overview / Notes
 
