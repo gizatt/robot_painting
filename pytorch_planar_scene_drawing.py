@@ -52,10 +52,10 @@ def convert_pose_to_matrix(pose):
     n = pose.size(0)
     out = torch.cat((torch.cos(pose[:, 2]).view(n, -1),
                      -torch.sin(pose[:, 2]).view(n, -1),
-                     pose[:, 0].view(n, -1),
+                     pose[:, 1].view(n, -1),
                      torch.sin(pose[:, 2]).view(n, -1),
                      torch.cos(pose[:, 2]).view(n, -1),
-                     pose[:, 1].view(n, -1)), 1)
+                     pose[:, 0].view(n, -1)), 1)
     out = out.view(n, 2, 3)
     return out
 
@@ -137,55 +137,80 @@ if __name__ == "__main__":
 
     # Test out by generating some sprites and drawing them into a larger image.
 
-    target_image_path = "data/kara.png"
+    target_image_path = "data/target.jpeg"
     target_image = imageio.imread(target_image_path).astype(np.float)/256.
     image_rows, image_cols, n_channels = target_image.shape
+
+    print("Rows: ", image_rows)
+    print("Cols: ", image_cols)
 
     brush_search_paths = ["data/brushes/*.png"]
     # Open every image in that folder
     brush_paths = sum([glob.glob(sp) for sp in brush_search_paths], [])
     print("Found brushes: ", brush_paths)
-    brushes = []
-    for brush_path in brush_paths:
-        for k in range(10):
-            brush_im = imageio.imread(brush_path).astype(np.float)/256.
-            brush_im[:, :, :3] = np.random.random(3)
-            brush_im[:, :, 3] *= 1. - np.random.random()/5.
-            brushes.append(brush_im)
 
-    image_pre = torch.ones(1, n_channels, image_rows, image_cols)
+    current_image = torch.ones(1, 3, image_rows, image_cols).cuda()
 
-    sprite_poses = torch.stack(
-        [torch.Tensor([torch.randint(low=int(-image_rows/3), high=int(image_rows/3), size=(1,)),
-                       torch.randint(low=int(-image_cols/3), high=int(image_cols/3), size=(1,)),
-                       torch.rand(1)*np.pi*2.]) for k in range(10)])
-    print("Poses: ", sprite_poses)
-    sprite_scales = torch.ones(10)*0.1
-    print("Starting...")
-    start_time = time.time()
-    sprite_ims = draw_sprites_at_poses(
-          sprite_poses,
-          sprite_scales,
-          brushes[0].shape[0], brushes[0].shape[1],
-          image_rows, image_cols,
-          numpy_images_to_torch(brushes*10)[:10, :, :, :].cuda())
-    print("done in %f seconds " % (time.time() - start_time))
+    raw_brushes = [imageio.imread(brush_path).astype(np.float) / 256. for brush_path in brush_paths]
+    raw_brushes = numpy_images_to_torch(raw_brushes).cuda()
 
-    start_time = time.time()
+    plt.figure()
+    myobj = plt.imshow(target_image)
+    #plt.show()
+    for outer_iter in range(10000):
+        print("Starting iter %d..." % outer_iter)
 
-    # Reduce down to one image
-    b2p, p2b = oilpaint_converters(device=torch.device('cuda'))
-    image_pre_oil = b2p(image_pre.cuda())
-    sprite_ims_oil = b2p(sprite_ims.cuda())
-    # Permute for easier alpha combo
-    image = image_pre_oil[0, :3, :, :]
-    for k in range(sprite_ims_oil.shape[0]):
-        alpha_map = 1. - sprite_ims_oil[k, 3, :, :]  # alphas inverted in absorb space
-        image = image * (1 - alpha_map) + sprite_ims_oil[k, :3, :, :] * alpha_map
-    result = p2b(image)
+        start_time = time.time()
 
-    print("Reductions done in %f seconds " % (time.time() - start_time))
-    image = torch_images_to_numpy(result.unsqueeze(0).cpu())[0]
+        N_sprites = 30
+        sprite_poses = torch.stack(
+            [torch.Tensor([torch.randint(low=int(-image_rows / 2), high=int(image_rows / 2), size=(1,)),
+                           torch.randint(low=int(-image_cols / 2), high=int(image_cols / 2), size=(1,)),
+                           torch.rand(1) * np.pi * 2.]) for k in range(N_sprites)])
 
-    plt.imshow(image)
+        brushes = []
+        for k in range(N_sprites):
+            brush_ind = k % len(brush_paths)
+            center = sprite_poses[k, 0:2]
+            center_x = int(min(max(center[0].item() + (image_rows / 2), 0), image_rows))
+            center_y = int(min(max(center[1].item() + (image_cols / 2), 0), image_cols))
+            this_brush = raw_brushes[brush_ind, :, :, :].clone()
+            for i in range(3):
+                this_brush[i, :, :] = target_image[center_x, center_y, i]
+            this_brush[3, :, :] *= 1. - np.random.random() / 2.
+            brushes.append(this_brush)
+        brushes = torch.stack(brushes)
+        sprite_scales = torch.rand(N_sprites) * 1. / np.log(1. + outer_iter**2)
+
+        print("Sprites set up in %f " % (time.time() - start_time))
+
+        start_time = time.time()
+        sprite_ims = draw_sprites_at_poses(
+              sprite_poses,
+              sprite_scales,
+              brushes.shape[2], brushes.shape[3],
+              image_rows, image_cols,
+                brushes)
+        print("Brush painting in %f seconds " % (time.time() - start_time))
+
+        start_time = time.time()
+
+        # Reduce down to one image
+        b2p, p2b = oilpaint_converters(device=torch.device('cuda'))
+        image_pre_oil = b2p(current_image)
+        sprite_ims_oil = b2p(sprite_ims.cuda())
+        # Permute for easier alpha combo
+        image = image_pre_oil[0, :3, :, :]
+        for k in range(sprite_ims_oil.shape[0]):
+            alpha_map = 1. - sprite_ims_oil[k, 3, :, :]  # alphas inverted in absorb space
+            image = image * (1 - alpha_map) + sprite_ims_oil[k, :3, :, :] * alpha_map
+        current_image = p2b(image).unsqueeze(0)
+
+        print("Reductions done in %f seconds " % (time.time() - start_time))
+
+        if (outer_iter % 10 == 0):
+            image = torch_images_to_numpy(current_image.cpu())[0]
+
+            myobj.set_data(image)
+            plt.pause(0.001)
     plt.show()
