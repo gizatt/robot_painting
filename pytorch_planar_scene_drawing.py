@@ -1,10 +1,42 @@
 import imageio
 import numpy as np
 import os
+import time
 import torch
 import torch.nn.functional as F
 
 device = torch.device('cpu')
+
+def submix_power(i):
+    # From https://github.com/ctmakro/opencv_playground,
+    # converted to torch.
+    def BGR2PWR(c):
+        # no overflow allowed
+        c = torch.clamp(c, min=1e-6, max=1.-1e-6)
+        for k in range(3):
+            c[..., k, :, :] = torch.pow(c[..., k, :, :], 2.2/i[k])
+        u = 1. - c
+        return u  # unit absorbance
+
+    def PWR2BGR(u):
+        c = 1. - u
+        for k in range(3):
+            c[..., k, :, :] = torch.pow(c[..., k, :, :], i[k]/2.2)
+        return c  # rgb color
+
+    def submix(c1, c2, ratio):
+        uabs1, uabs2 = BGR2PWR(c1), BGR2PWR(c2)
+        mixuabs = (uabs1 * ratio) + (uabs2*(1-ratio))
+        return PWR2BGR(mixuabs)
+
+    return submix, BGR2PWR, PWR2BGR
+
+
+def oilpaint_converters(device):
+    submix, b2p, p2b = submix_power(torch.tensor([13, 3, 7.], device=device))
+    return b2p, p2b
+
+
 
 def convert_pose_to_matrix(pose):
     '''
@@ -75,7 +107,7 @@ def draw_sprites_at_poses(pose, sprite_rows, sprite_cols,
     print("Cols: ", sprite_cols, image_cols)
 
     print(sprites.shape)
-    grid = F.affine_grid(tf, torch.Size((n, n_channels, image_rows, image_cols)))
+    grid = F.affine_grid(tf.cuda(), torch.Size((n, n_channels, image_rows, image_cols)))
     out = F.grid_sample(sprites, grid,
                         padding_mode="zeros", mode="nearest")
     return out.view(n, n_channels, image_rows, image_cols)
@@ -105,7 +137,9 @@ if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as plt
 
-    demo_image = "data/kara.png"
+    print("CUDA? ", torch.cuda.is_available())
+
+    demo_image = "none" # "data/kara.png"
     if os.path.isfile(demo_image):
         sprite_1 = imageio.imread("data/kara.png").astype(np.float)/256.
         sprite_2 = imageio.imread("data/kara.png").astype(np.float)/256.
@@ -113,22 +147,48 @@ if __name__ == "__main__":
     else:
         sprite_rows = 100
         sprite_cols = 100
-        n_channels = 3
-        sprite_1 = np.ones([sprite_rows, sprite_cols, n_channels])
-        sprite_2 = np.ones([sprite_rows, sprite_cols, n_channels])
+        n_channels = 4
+        sprite_1 = np.zeros([sprite_rows, sprite_cols, n_channels])
+        sprite_1[:, :, 3] = 0.75
+        sprite_red = sprite_1.copy()
+        sprite_red[:, :, 0] = 1.
+        sprite_blue = sprite_1.copy()
+        sprite_blue[:, :, 2] = 1.
+        sprite_green = sprite_1.copy()
+        sprite_green[:, :, 1] = 1.
 
     image_rows = 1000
     image_cols = 1000
-    image_pre = torch.zeros(1, n_channels, image_rows, image_cols)
-    print(image_pre.shape)
-    images_post = draw_sprites_at_poses(
-          torch.stack([torch.Tensor(torch.Tensor([-250.0, -250.0, np.pi/4.])),
-                       torch.Tensor(torch.Tensor([250, 250, np.pi/2]))]),
+    image_pre = torch.ones(1, n_channels, image_rows, image_cols)
+    sprite_poses = torch.stack(
+        [torch.Tensor([torch.randint(low=-500, high=500, size=(1,)),
+                       torch.randint(low=-500, high=500, size=(1,)),
+                       torch.rand(1)*np.pi*2.]) for k in range(100)])
+    print(sprite_poses.shape)
+    print("Starting...")
+    start_time = time.time()
+    sprite_ims = draw_sprites_at_poses(
+          sprite_poses,
           sprite_rows, sprite_cols,
           image_rows, image_cols,
-          numpy_images_to_torch([sprite_1, sprite_2]))
+          numpy_images_to_torch([sprite_red, sprite_blue, sprite_green]*100)[:100, :, :, :].cuda())
+    print("done in %f seconds " % (time.time() - start_time))
 
-    image = torch_images_to_numpy(image_pre + images_post.sum(dim=0))[0]
+    start_time = time.time()
+
+    # Reduce down to one image
+    b2p, p2b = oilpaint_converters(device=torch.device('cuda'))
+    image_pre_oil = b2p(image_pre.cuda())
+    sprite_ims_oil = b2p(sprite_ims.cuda())
+    # Permute for easier alpha combo
+    image = image_pre_oil[0, :3, :, :]
+    for k in range(sprite_ims_oil.shape[0]):
+        alpha_map = 1. - sprite_ims_oil[k, 3, :, :]  # alphas inverted in absorb space
+        image = image * (1 - alpha_map) + sprite_ims_oil[k, :3, :, :] * alpha_map
+    result = p2b(image)
+
+    print("Reductions done in %f seconds " % (time.time() - start_time))
+    image = torch_images_to_numpy(result.unsqueeze(0).cpu())[0]
 
     plt.imshow(image)
     plt.show()
