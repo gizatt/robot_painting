@@ -1,7 +1,10 @@
+import glob
+import time
+
+import cv2
 import imageio
 import numpy as np
-import os
-import time
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
@@ -67,10 +70,10 @@ def invert_tf_matrix(tf):
     return new_tf
 
 
-def draw_sprites_at_poses(pose, sprite_rows, sprite_cols,
+def draw_sprites_at_poses(pose, scale, sprite_rows, sprite_cols,
                           image_rows, image_cols, sprites):
     '''
-    Given a batch of poses (n x 3), a shared sprite + output image size,
+    Given a batch of poses (n x 3), scales (n), a shared sprite + output image size,
     and a batch of sprites (n x n_channels x sprite_size_x x sprite_size_y),
     returns a n x image_size_x x image_size_y batch of images from
     rendering those sprites at those locations.
@@ -103,13 +106,13 @@ def draw_sprites_at_poses(pose, sprite_rows, sprite_cols,
     # with the input image.
     tf[:, 0, 0:2] /= (float(sprite_cols) / float(image_cols))
     tf[:, 1, 0:2] /= (float(sprite_rows) / float(image_rows))
-    print("Rows: ", sprite_rows, image_rows)
-    print("Cols: ", sprite_cols, image_cols)
 
-    print(sprites.shape)
+    # Apply global sprite scaling
+    tf[:, 0:2, 0:3] /= scale.view(-1, 1, 1).repeat(1, 2, 3)
+
     grid = F.affine_grid(tf.cuda(), torch.Size((n, n_channels, image_rows, image_cols)))
     out = F.grid_sample(sprites, grid,
-                        padding_mode="zeros", mode="nearest")
+                        padding_mode="zeros", mode="bilinear")
     return out.view(n, n_channels, image_rows, image_cols)
 
 
@@ -133,45 +136,39 @@ def torch_images_to_numpy(images):
 if __name__ == "__main__":
 
     # Test out by generating some sprites and drawing them into a larger image.
-    import cv2
-    import numpy as np
-    import matplotlib.pyplot as plt
 
-    print("CUDA? ", torch.cuda.is_available())
+    target_image_path = "data/kara.png"
+    target_image = imageio.imread(target_image_path).astype(np.float)/256.
+    image_rows, image_cols, n_channels = target_image.shape
 
-    demo_image = "none" # "data/kara.png"
-    if os.path.isfile(demo_image):
-        sprite_1 = imageio.imread("data/kara.png").astype(np.float)/256.
-        sprite_2 = imageio.imread("data/kara.png").astype(np.float)/256.
-        sprite_rows, sprite_cols, n_channels = sprite_1.shape
-    else:
-        sprite_rows = 100
-        sprite_cols = 100
-        n_channels = 4
-        sprite_1 = np.zeros([sprite_rows, sprite_cols, n_channels])
-        sprite_1[:, :, 3] = 0.75
-        sprite_red = sprite_1.copy()
-        sprite_red[:, :, 0] = 1.
-        sprite_blue = sprite_1.copy()
-        sprite_blue[:, :, 2] = 1.
-        sprite_green = sprite_1.copy()
-        sprite_green[:, :, 1] = 1.
+    brush_search_paths = ["data/brushes/*.png"]
+    # Open every image in that folder
+    brush_paths = sum([glob.glob(sp) for sp in brush_search_paths], [])
+    print("Found brushes: ", brush_paths)
+    brushes = []
+    for brush_path in brush_paths:
+        for k in range(10):
+            brush_im = imageio.imread(brush_path).astype(np.float)/256.
+            brush_im[:, :, :3] = np.random.random(3)
+            brush_im[:, :, 3] *= 1. - np.random.random()/5.
+            brushes.append(brush_im)
 
-    image_rows = 1000
-    image_cols = 1000
     image_pre = torch.ones(1, n_channels, image_rows, image_cols)
+
     sprite_poses = torch.stack(
-        [torch.Tensor([torch.randint(low=-500, high=500, size=(1,)),
-                       torch.randint(low=-500, high=500, size=(1,)),
-                       torch.rand(1)*np.pi*2.]) for k in range(100)])
-    print(sprite_poses.shape)
+        [torch.Tensor([torch.randint(low=int(-image_rows/3), high=int(image_rows/3), size=(1,)),
+                       torch.randint(low=int(-image_cols/3), high=int(image_cols/3), size=(1,)),
+                       torch.rand(1)*np.pi*2.]) for k in range(10)])
+    print("Poses: ", sprite_poses)
+    sprite_scales = torch.ones(10)*0.1
     print("Starting...")
     start_time = time.time()
     sprite_ims = draw_sprites_at_poses(
           sprite_poses,
-          sprite_rows, sprite_cols,
+          sprite_scales,
+          brushes[0].shape[0], brushes[0].shape[1],
           image_rows, image_cols,
-          numpy_images_to_torch([sprite_red, sprite_blue, sprite_green]*100)[:100, :, :, :].cuda())
+          numpy_images_to_torch(brushes*10)[:10, :, :, :].cuda())
     print("done in %f seconds " % (time.time() - start_time))
 
     start_time = time.time()
