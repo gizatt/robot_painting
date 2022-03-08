@@ -16,16 +16,22 @@ def submix_power(i):
     def BGR2PWR(c):
         # no overflow allowed
         c = torch.clamp(c, min=1e-6, max=1.-1e-6)
+        c_new = torch.empty_like(c)
         for k in range(3):
-            c[..., k, :, :] = torch.pow(c[..., k, :, :], 2.2/i[k])
-        u = 1. - c
+            c_new[..., k, :, :] = torch.pow(c[..., k, :, :], 2.2/i[k])
+        if c.shape[1] > 3:
+            c_new[..., 3:, :, :] = c[..., 3:, :, :]
+        u = 1. - c_new
         return u  # unit absorbance
 
     def PWR2BGR(u):
         c = 1. - u
+        c_new = torch.empty_like(c)
         for k in range(3):
-            c[..., k, :, :] = torch.pow(c[..., k, :, :], i[k]/2.2)
-        return c  # rgb color
+            c_new[..., k, :, :] = torch.pow(c[..., k, :, :], i[k]/2.2)
+        if c.shape[1] > 3:
+            c_new[..., 3:, :, :] = c[..., 3:, :, :]
+        return c_new  # rgb color
 
     def submix(c1, c2, ratio):
         uabs1, uabs2 = BGR2PWR(c1), BGR2PWR(c2)
@@ -65,7 +71,7 @@ def invert_tf_matrix(tf):
     new_tf = torch.empty(tf.shape, dtype=tf.dtype)
     new_tf[:, 0:2, 0:2] = tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2)
     new_tf[:, :, 2] = -1.*torch.bmm(
-        new_tf[:, 0:2, 0:2],
+        tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2),
         tf[:, 0:2, 2].unsqueeze(2)).squeeze(2)
     return new_tf
 
@@ -93,7 +99,6 @@ def draw_sprites_at_poses(pose, scale, sprite_rows, sprite_cols,
 
     tf = convert_pose_to_matrix(pose)
     tf = invert_tf_matrix(tf)
-
     # Scale down the offset to move by pixel rather than
     # by a factor of the half image size
     # (A movement of "+1" moves the sprite by image_size/2 in the given
