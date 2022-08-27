@@ -3,11 +3,13 @@ import serial
 import time
 import argparse
 import sys
+import numpy as np
 
 
 class PrinterController():
     def __init__(self, port_name):
         self.ser = serial.Serial(port_name, 115200)
+        self.last_xyz = np.zeros(3)
         # Need to wait for the printer to turn on.
         time.sleep(3.)
 
@@ -39,6 +41,7 @@ class PrinterController():
 
     def set_current_location(self, x=0., y=0., z=0.):
         self.command(f"G92 X{x} Y{y} Z{z} \r\n", timeout=1.)
+        self.last_xyz[:] = (x, y, z)
 
     def disable_steppers(self):
         self.command("M18\r\n", timeout=1.)
@@ -51,14 +54,14 @@ class PrinterController():
 
     def set_mm_units(self):
         self.command("G21 \r\n", timeout=1.)
-    
+
     def disable_software_endstops(self):
         self.command("M211 S0 \r\n", timeout=1.)
 
     def enable_software_endstops(self):
         self.command("M211 S1 \r\n", timeout=1.)
 
-    def move(self, x=None, y=None, z=None, speed=None):
+    def move(self, x=None, y=None, z=None, speed=100, wait=False):
         # x, y, z are in mm; speed is in mm/sec. We convert
         # the speed to mm/min and use as a feed rate command.
         cmd_str = "G1"
@@ -72,13 +75,24 @@ class PrinterController():
             cmd_str += f" F{speed * 60.}"
         self.command(f"{cmd_str} \r\n", timeout=1.)
 
+        if wait:
+            target = self.last_xyz * 1.
+            if x:
+                target[0] = x
+            if y:
+                target[1] = y
+            if z:
+                target[2] = z
+            slew_time = np.linalg.norm(target - self.last_xyz) / slew_time
+            time.sleep(slew_time)
+
 
 if __name__ == "__main__":
-    
+
     parser = argparse.ArgumentParser(
         description='Drive a connected 3D printer. Call an available command, specifying its arguments as pairs <arg name> <float value>.')
 
-    #parser.add_argument(
+    # parser.add_argument(
     #    'command', type=str, help=f"Python command; you'll have a `controller` to use.")
     parser.add_argument('--port', type=str, default="COM12")
 
@@ -92,7 +106,7 @@ if __name__ == "__main__":
         print(f"Other options: {[x.device for x in list_ports.comports()]}")
         sys.exit(-1)
 
-    #eval(args.command)
+    # eval(args.command)
 
     controller.set_current_location(0, 0, 0)
     controller.move(x=10, y=10, speed=100)
