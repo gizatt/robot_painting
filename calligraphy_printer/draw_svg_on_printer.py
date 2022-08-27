@@ -14,7 +14,7 @@ draw_area_size_mm = np.array([200, 200])
 lift_height_mm = 8.
 starting_height = 5.
 draw_height_mm = 4.
-draw_speed_mms = 10
+draw_speed_mms = 100
 
 
 plt.figure()
@@ -39,7 +39,7 @@ for k, (path, attribs) in enumerate(zip(paths, attributes)):
         points[:, 0], points[:, 1], color=color
     )
 
-plt.show(False)
+plt.show(block=False)
 
 # Connect to printer
 controller = PrinterController(port_name="COM12")
@@ -54,22 +54,29 @@ time.sleep(1.)
 print("Starting to draw!")
 
 # Spool out these points, delaying appropriately based on move distances.
+def get_safe_point(x):
+    return np.array(
+        [np.clip(x[0], 0., draw_area_size_mm[0]),
+        np.clip(x[1], 0., draw_area_size_mm[1])]
+    )
+
 for points in all_points:
     # Move up and over to start.
-    x0 = points[0, :]
+    x0 = get_safe_point(points[0, :])
     controller.move(x=x0[0], y=x0[1], z=lift_height_mm, wait=True)
     # Press into surface
     controller.move(x=x0[0], y=x0[1], z=draw_height_mm, wait=True)
 
     # Spool out all points
     for x in points:
+        x = get_safe_point(x)
         controller.move(x=x[0], y=x[1], z=draw_height_mm,
                         speed=draw_speed_mms, wait=True)
-    xf = points[-1, :]
+    xf = get_safe_point(points[-1, :])
     # Raise
     controller.move(x=xf[0], y=xf[1], z=lift_height_mm, wait=True)
 
 print("Done! Rehoming.")
-controller.move(0, 0, starting_height, speed=1000, wait=True)
+controller.move(0, 0, starting_height, speed=100, wait=True)
 print("Sleeping after rehome...")
 time.sleep(1.)

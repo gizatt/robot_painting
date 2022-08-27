@@ -75,16 +75,18 @@ class PrinterController():
             cmd_str += f" F{speed * 60.}"
         self.command(f"{cmd_str} \r\n", timeout=1.)
 
+        target = self.last_xyz * 1.
+        if x:
+            target[0] = x
+        if y:
+            target[1] = y
+        if z:
+            target[2] = z
+        slew_time = np.linalg.norm(target - self.last_xyz) / speed
         if wait:
-            target = self.last_xyz * 1.
-            if x:
-                target[0] = x
-            if y:
-                target[1] = y
-            if z:
-                target[2] = z
-            slew_time = np.linalg.norm(target - self.last_xyz) / slew_time
+            print(f"Waiting for slew time {slew_time}")
             time.sleep(slew_time)
+        self.last_xyz = target
 
 
 if __name__ == "__main__":
