@@ -1,9 +1,11 @@
-from ctypes import resize
 import numpy as np
+import time
+import serial
 
 import pyglet
 import pyglet.gl
 
+from printer_controller import PrinterController
 
 class ArrayImage:
     """Dynamic pyglet image of a numpy uint8 NxN array of float (0-to-1).
@@ -23,7 +25,7 @@ class ArrayImage:
         bytes_per_channel = 1
         self.pitch = array.shape[1] * format_size * bytes_per_channel
         self.image = pyglet.image.ImageData(
-            array.shape[0], array.shape[1], "I", self._tex_data)
+            array.shape[1], array.shape[0], "I", self._tex_data)
         self._update_image()
 
     @property
@@ -47,12 +49,30 @@ class CanvasManager():
     def __init__(self, window):
         self.window = window
 
-        self.draw_area_size = np.array([1024, 1024])
+        # Printing details
+        self.draw_area_size_mm = np.array([150, 100])
+        self.lift_height_mm = 8.
+        self.starting_height = 5.
+        self.draw_height_mm = 3.
+        try:
+            self.controller = PrinterController(port_name="COM12")
+            self.controller.disable_software_endstops()
+            # Printer won't allow itself to go below 0 z, so offset our coordinates up.
+            self.controller.set_current_location(0., 0., self.starting_height)
+            time.sleep(1.)
+            self.controller.move(0, 0, self.starting_height, speed=100) # Gets steppers turned on.
+        except serial.serialutil.SerialException:
+            print("Couldn't get printer!")
+            self.controller = None
+
+        self.draw_area_size = np.array([1500, 1000])
         self.draw_area_pos = np.array([0, 0])
         window.set_size(*self.draw_area_size)
         window.set_minimum_size(*self.draw_area_size)
 
-        canvas_arr = np.ones(self.draw_area_size, dtype=np.uint8)*255
+        # Need transpose to deal with numpy being row-column and
+        # other coords being x (horizontal) then y (vertical).
+        canvas_arr = np.ones((self.draw_area_size[1], self.draw_area_size[0]), dtype=np.uint8)*255
         self.canvas_img = ArrayImage(canvas_arr)
         self.mouse_xy = np.zeros(2)
         self.last_mouse_xy = np.zeros(2)
@@ -76,6 +96,27 @@ class CanvasManager():
             self.mouse_state = False
 
         pyglet.clock.schedule(self.on_frame)
+        pyglet.clock.schedule_interval(self.on_control_tick, 0.02)
+        
+    def __del__(self):
+        self.rehome()
+
+    def rehome(self):
+        if self.controller:
+            # Put print head back at origin.
+            self.controller.move(0, 0, self.starting_height, speed=1000)
+            print("Waiting for final move to finish...")
+            time.sleep(5.0)
+
+    def on_control_tick(self, dt):
+        if self.controller:
+            if self.mouse_state:
+                z = self.draw_height_mm
+            else:
+                z = self.lift_height_mm
+            xy = np.clip( (self.mouse_xy - self.draw_area_pos) / self.draw_area_size, 0., 1.) * self.draw_area_size_mm
+            print(f"Command xyz: {xy}, {z}")
+            self.controller.move(x=xy[0], y=xy[1], z=z, speed=100.)
 
     def on_frame(self, dt):
         if self.mouse_state and self.last_mouse_state:
@@ -88,10 +129,15 @@ class CanvasManager():
                 x, y = self.mouse_xy * t_norm + \
                     self.last_mouse_xy * (1. - t_norm)
                 u, v = self.get_data_coords(x, y)
+                print(x, y)
                 for i in range(-r, r):
+                    if u + i < 0 or u + i >= self.draw_area_size[0]:
+                        continue
                     for j in range(-r, r):
+                        if v + j < 0 or v + j >= self.draw_area_size[1]:
+                            continue
                         if i**2 + j**2 <= r**2:
-                            self.canvas_img.array[v + i, u + j] = 0
+                            self.canvas_img.array[v + j, u + i] = 0
 
         self.canvas_img.update()
         self.canvas_img.image.blit(0, 0)
@@ -106,7 +152,9 @@ class CanvasManager():
 
 if __name__ == "__main__":
     window = pyglet.window.Window(resizable=True)
-
+    
     canvas_manager = CanvasManager(window)
 
     pyglet.app.run()
+
+    canvas_manager.rehome()

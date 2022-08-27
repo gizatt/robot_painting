@@ -7,15 +7,9 @@ import sys
 
 class PrinterController():
     def __init__(self, port_name):
-        try:
-            self.ser = serial.Serial(port_name, 115200)
-            # Need to wait for the printer to turn on.
-            time.sleep(3.)
-        except serial.serialutil.SerialException:
-            print(f"Couldn't open serial port {port_name}.")
-            from serial.tools import list_ports
-            print(f"Other options: {[x.device for x in list_ports.comports()]}")
-            sys.exit(-1)
+        self.ser = serial.Serial(port_name, 115200)
+        # Need to wait for the printer to turn on.
+        time.sleep(3.)
 
     def command(self, command, timeout=30.):
         print(f"Sending: {command}")
@@ -57,6 +51,12 @@ class PrinterController():
 
     def set_mm_units(self):
         self.command("G21 \r\n", timeout=1.)
+    
+    def disable_software_endstops(self):
+        self.command("M211 S0 \r\n", timeout=1.)
+
+    def enable_software_endstops(self):
+        self.command("M211 S1 \r\n", timeout=1.)
 
     def move(self, x=None, y=None, z=None, speed=None):
         # x, y, z are in mm; speed is in mm/sec. We convert
@@ -84,7 +84,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    controller = PrinterController(port_name=args.port)
+    try:
+        controller = PrinterController(port_name=args.port)
+    except serial.serialutil.SerialException:
+        print(f"Couldn't open serial port {args.port}.")
+        from serial.tools import list_ports
+        print(f"Other options: {[x.device for x in list_ports.comports()]}")
+        sys.exit(-1)
+
     #eval(args.command)
 
     controller.set_current_location(0, 0, 0)
