@@ -2,16 +2,126 @@
 
 Ultimately, I want to make my robot paint pictures. Having my computer paint them digitally would be a good start.
 
-## Approach / TODOs:
+I'm focusing on making implementation choices that support using a 3D printer with a top-down camera and brush [brush *pen*, to start] attached to it as my "robot". That means:
 
-Roughly ordered digital painting todos:
-  - Write a very simple differentiable painting program, following the oil model that I really like used in [this work](https://github.com/ctmakro/opencv_playground).
-  - Attempt to reproduce the results in that repo (e.g. try random rollouts of brushstrokes and accept the best ones). Maybe inject some gradient descent.
-  - Play with different losses -- e.g. a GAN loss, a style transfer loss.
-  - Try to write an N-step MPC to try to paint target images. May need significant neural components. (Calculating cost, so MPC knows what to go downhill on: to start with, discretize the colors of the target image to their nearest neighbors in the color set, and then measure pixelwise error. An alternative could be to learn an encoding of all paintings with a VAE, and map the partial image and target image into that feature space, and take distance there, and take actions to decrease that distance. Might be cool as an extension.)
+1) Observations are top-down images of the painting (but only taken between brushstrokes).
+2) Actions are 3D brush position and velocity, without orientation control. I'll apply driver-level XYZ bounds on brush position to prevent crashes.
 
-Roughly ordered robot painting todos:
-  - Architect a more robot-like stroke controller and stroke model, and find a way to fit it to data. (Possible target "action" description: put brush down at a given coordinate (x, y, in image coordinates) with a given color (indexed into a preprogrammed color set) and a given force. Move it, with linear interp in x, y, and force, to a  another location (at a fixed a-priori tip speed)? Seems insufficiently expressive. Mixed continuous-discrete with velocity control but also brush lifting / setting feels better...)
+## Note on code generation
+
+I'm using this project to try out using LLMs (specifically GPT-4) to speed up my dev process by helping me write code and tests. But I want to acknowledge that it's very hard to tell if it's re-using licensed code! So while I've applied an MIT license generally (as I usually do), note there's a risk that other licenses may leak have leaked in here.
+
+## Thoughts on approach
+
+Grab bag of attributes I think are important:
+
+- The input is going to be just a reference image; I'm happy to play with applying styles to it down the road, but just reproducing it will be a good first challenge.
+- I'd like this to produce detailed, crisp final images, and I think an important part of doing that is having a model that
+  i) Works at multiple scales, so it can foveat parts of the image that need fine detail without needing to reason about the whole image at that resolution.
+  ii) Works iteratively with each stroke making the image closer to the target.
+  iii) Doesn't make serious mistakes, or has enough transparency that I can tune it to be conservative in media-specific ways. e.g. brush pens or calligraphy makes certain kinds of mistakes irreversible.
+- The stroke model is mostly trained using randomly-acquired data from the environment, but can get fine-tuned at runtime, as each new stroke we execute is a new datapoint. I can also use hand-coded simple models to start. The input should be a foveated image region
+- The "stroke generator" is the obvious hard part. I have many ideas about a fancy version (looking multiple strokes into the future to think about multi-stroke strategies), but a greedy single-stroke optimizer seems like a fine start. The simplest form of that may be to have a differentiable stroke model that optimizes a batch of strokes and picks the best. I've tried batched gradient descent against a sprite rendering model, but the gradients are really weak -- this could be a good opportunity to try out a diffusion model or other neural optimizer.
+  - **I ought to try directly learning a differentiable approximation to the reward function as my first thing, then just do gradient descent on it.**
+  - It looks like I might be able to try [this paper](https://arxiv.org/pdf/2205.09991.pdf) directly -- code [here](https://github.com/jannerm/diffuser). Issue: this classifier-guided sampling strategy uses diffusion to model the trajectories -- which I don't have much  trouble generating -- but learns a *separate* model for how "good" each trajectory is w.r.t. some reward function, and cludges that into the diffusion update as an extra term by taking its gradient. I feel like that gradient is the hard part for me -- learning the update step directly (a la the core idea of diffusion) rather than taking a gradient of a learned value function feels "better" here. Diffusion techniques seem to focus on capturing distributions of trajectories that are "interesting" -- e.g. capturing human demonstrations for imitation learning. So maybe this isn't what I'm looking for.
+- To keep things simpler, trajectories could be forced to be fixed-length. If you want a shorter stroke, just cram the knots together.
+
+I'd like to use an explicit MPC-like approach for this, where the method breaks down into a few components:
+
+1) A paintstroke execution model that faithfully captures the result of apply a paintstroke, parameterized by some discrete (color) and continuous (brush pose, velocity, motion history) attributes. 
+2) A controller that 
+
+
+## Block diagrams
+
+### Overall
+```
+
+(~~~~~~~~~~~~~~~~)   (******************)
+(  Target image  )   (  Current image   )
+(****************)   (******************)
+        |                      |
+       \|/                    \|/
+|----------------------------------------------------------|
+|  STROKE GENERATOR                                        |    |--------------|
+|    Given current state, target image, and stroke model,  |<---| STROKE MODEL |
+|    selects next stroke trajectory.                       |    |--------------|
+|----------------------------------------------------------|               /|\
+          |                                                                 |
+          |                                                                 |
+         \|/                                                                |
+(~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~)    |
+(  TIMED TRAJECTORY OF STROKE TO EXECUTE                               )    |
+(    Starts and stops at zero velocity.                                )----|
+(    Printer moves a safe distance above start point, descends to it,  )    |
+(    executes, and then lifts from end point.                          )    |
+(~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~)    |
+         |                                                                  |
+         |                                                                  |
+    |----------|                                                            |
+    |CONTROLLER|                                                            |
+    | (hw only)|                                                            |
+    |----------|                                                            |
+         |                                                                  |
+        \|/                                                                 |
+|------------------|                 (~~~~~~~~~~~~~~~~~)                    |
+|   ENVIRONMENT    | --------------> ( Resulting image ) --------------------
+|------------------|                 (~~~~~~~~~~~~~~~~~)
+
+```
+### Stroke model
+```
+(~~~~~~~~~~~~~~~~~~~~~~~~~~)
+( TIMED STROKE TRAJECTORY  )
+(      fixed length?       )
+(~~~~~~~~~~~~~~~~~~~~~~~~~~)         (Current image)
+           |                               |
+          \|/                             \|/
+|---------------------------------------------------------------------|
+|                   STROKE MODEL                                      |
+|    - Capture (possibly multi-scale) a foveated views centered at    |
+|      each knot of trajectory.                                       |
+|    - Encode each patch to big vector with fully connected layer.    |
+|    - Pass embeddings + paired trajectory params through big network |
+|      to get outputs.  (Transformer encoder?)                        |
+|                                                                     |
+|---------------------------------------------------------------------|
+                |                            |
+               \|/                          \|/
+         (Resulting image)            (Expected loss)
+```
+Trained on collected input/output pairs generated with random actions.
+
+And a similar model for expected reward:
+```
+(~~~~~~~~~~~~~~~~~~~~~~~~~~)
+( TIMED STROKE TRAJECTORY  )
+(      fixed length?       )
+(~~~~~~~~~~~~~~~~~~~~~~~~~~)         (Current image)      (Target image)
+           |                               |                     |
+          \|/                             \|/                   \|/
+|---------------------------------------------------------------------|
+|                   STROKE MODEL                                      |
+|    - Capture (possibly multi-scale) a foveated views centered at    |
+|      each knot of trajectory of both current + target im.           |
+|    - Encode each patch to big vector with fully connected layer.    |
+|    - Pass embeddings + paired trajectory params through big network |
+|      to get outputs.  (Transformer encoder?)                        |
+|                                                                     |
+|---------------------------------------------------------------------|
+                |
+               \|/
+         (Expected loss)
+```
+Trained on input image + random stroke (or sometimes GT stroke) + target output
+image.
+
+These feel like they should share most of their representation... maybe
+the patch encoding blocks, at least. The actual transformer input seqs
+are different so no sharing there.
+
+### Stroke generator using differentiable stroke model
+
 
 ## Overview / Notes
 
