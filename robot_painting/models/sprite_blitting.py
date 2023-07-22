@@ -39,8 +39,8 @@ def submix_power(i):
     return submix, BGR2PWR, PWR2BGR
 
 
-def oilpaint_converters():
-    submix, b2p, p2b = submix_power(torch.tensor([13, 3, 7.]))
+def oilpaint_converters(device=torch.device('cpu')):
+    submix, b2p, p2b = submix_power(torch.tensor([13, 3, 7.], device=device))
     return b2p, p2b
 
 
@@ -66,7 +66,7 @@ def convert_pose_to_matrix(pose):
 
 def invert_tf_matrix(tf):
     ''' Inverts a nx2x3 affine TF matrix. '''
-    new_tf = torch.empty(tf.shape, dtype=tf.dtype)
+    new_tf = torch.empty(tf.shape, dtype=tf.dtype, device=tf.device)
     new_tf[:, 0:2, 0:2] = tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2)
     new_tf[:, :, 2] = -1.*torch.bmm(
         tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2),
@@ -92,15 +92,20 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
     sprite_rows = sprites.size(2)
     sprite_cols = sprites.size(3)
 
-    im_T_sprites = convert_pose_to_matrix(im_T_sprites)
+    # Flip x and y, since "x" is the column dim in `affine_grid`
+    im_T_sprites = convert_pose_to_matrix(
+        torch.stack([im_T_sprites[:, 1], im_T_sprites[:, 0], im_T_sprites[:, 2]], dim=1)
+    )
+    # Map from 0 to pixel size to -1 to 1.
+    im_T_sprites[:, 0, 2] = im_T_sprites[:, 0, 2] / (float(image_cols) / 2.) - 1.0
+    im_T_sprites[:, 1, 2] = im_T_sprites[:, 1, 2] / (float(image_rows) / 2.) - 1.0
+
     sprites_T_im = invert_tf_matrix(im_T_sprites)
     # Scale down the offset to move by pixel rather than
     # by a factor of the half image size
     # (A movement of "+1" moves the sprite by image_size/2 in the given
     # dimension).
     # X and Y are flipped here, as the "x" dim is the column dimension
-    sprites_T_im[:, 0, 2] = sprites_T_im[:, 0, 2] / (float(sprite_cols) / 2.) - 0.5
-    sprites_T_im[:, 1, 2] = sprites_T_im[:, 1, 2] / (float(sprite_rows) / 2.) - 0.5
     # And scale the whole transformation by the ratio of sprite to image
     # ratio -- the default affine_grid will fill the output image
     # with the input image.
@@ -124,6 +129,9 @@ def numpy_images_to_torch(images):
 
 
 def torch_images_to_numpy(images):
+    if images.dim() == 3:
+        return images.permute(1, 2, 0).cpu().detach().numpy()
+    
     assert images.dim() == 4, \
            "Images must be batched n x channels x x_dim x y_dim"
     images_out = []
