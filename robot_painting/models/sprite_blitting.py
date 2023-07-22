@@ -113,7 +113,8 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
     sprites_T_im[:, 1, 0:2] /= (float(sprite_rows) / float(image_rows))
 
     # Apply global sprite scaling
-    sprites_T_im[:, 0:2, 0:3] /= scales.view(-1, 1, 1).repeat(1, 2, 3)
+    print(sprites_T_im.shape, scales.shape)
+    sprites_T_im[:, 0:2, 0:3] /= scales.view(-1, 1, 1).expand(-1, 2, 3)
 
     grid = F.affine_grid(sprites_T_im, torch.Size((n, n_channels, image_rows, image_cols)), align_corners=False)
     out = F.grid_sample(sprites, grid,
@@ -124,8 +125,11 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
 def numpy_images_to_torch(images):
     # Torch generally wants ordering [channels, x, y]
     # while numpy as has [x, y, channels]
-    return torch.stack([torch.Tensor(image).permute(2, 0, 1)
-                        for image in images], dim=0)
+    if len(images.shape) == 3:
+        return torch.Tensor(images).permute(2, 0, 1)
+    else:
+        return torch.stack([torch.Tensor(image).permute(2, 0, 1)
+                            for image in images], dim=0)
 
 
 def torch_images_to_numpy(images):

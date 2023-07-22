@@ -31,17 +31,13 @@ class StrokeModel(nn.Module, ABC):
             and 1 being "full pressure".
         '''
     @abstractmethod
-    def forward(self, images, trajectories, out_images = None):
+    def forward(self, images, trajectories, colors, out_images = None):
         '''
             images: N_batch x N_channels x N_rows x N_cols
-            trajectories: N_batch x N_knots x 4
+            trajectories: N_batch x N_spline_pts x 4 [t, x, y, z] spline points
+            colors: N_batch x 4 brush colors [rgba]
         '''
         ...
-
-
-
-    
-
 
 
 class BlittingStrokeModel(StrokeModel):
@@ -49,49 +45,77 @@ class BlittingStrokeModel(StrokeModel):
         Simple model of paint strokes that renders trajectories by blitting a sprite
         along the stroke trajectory, using an appealing oil model for paint mixing.
     '''
-    def __init__(self, brush_search_paths: typing.Iterable[str]):
+    def __init__(self, brush_path: str):
         super(BlittingStrokeModel, self).__init__()
-        self.load_brushes(brush_search_paths)
+        brush = imageio.imread(brush_path).astype(float) / 256.
+        self.register_buffer("brush", numpy_images_to_torch(brush))
 
-    def load_brushes(self, brush_search_paths: typing.Iterable[str]):
-        # Open every image in the brush dir`
-        brush_paths = sum([glob.glob(sp) for sp in brush_search_paths], [])
-        LOG.info(f"Found brushes: {brush_paths}")
-
-        raw_brushes = [imageio.imread(brush_path).astype(float) / 256. for brush_path in brush_paths]
-        self.register_buffer("brushes", numpy_images_to_torch(raw_brushes))
-
-    def forward(self, images, trajectories, out_images = None):
+    def forward(self, images, trajectories, colors, out_images = None):
         '''
-            images: N_batch x N_channels x N_rows x N_cols
-            trajectories: N_batch x N_knots x 4
-
-            N_channels should match the preloaded brushes.
+            images: N_batch x 4 x N_rows x N_cols
+            trajectories: N_batch x 4 [t, x, y, z] x N_spline_pts spline points
+            colors: N_batch x 4 brush colors [rgba]
         '''
         if out_images is None:
-            out_images = torch.zeros_like(images)
+            out_images = torch.empty_like(images)
         else:
             assert out_images.shape == images.shape
     
-        b2p, p2b = oilpaint_converters(device=self.device)
+        b2p, p2b = oilpaint_converters(device=images.device)
 
         # For each image in our batch...
         for i in range(images.shape[0]):
-            # Turn the trajectory into a series of poses by 
+            # Evaluate position and velocity at the knots of the spline
+            ts = trajectories[i, 0, :]
+            print(ts)
+            spline = NaturalCubicSpline(natural_cubic_spline_coeffs(ts, trajectories[i, 1:, :].T))
+            q = spline.evaluate(ts)
+            qd = spline.derivative(ts, order=1)
+            assert not torch.any(torch.isnan(q))
+            assert not torch.any(torch.isnan(qd))
+            # Use xy's to figure out brush center, and direction of velocity
+            # to figure out yaw
+            poses = torch.stack([
+                q[:, 0], q[:, 1], torch.atan2(qd[:, 1], qd[:, 1])
+            ], dim=1)
 
-            # Loop over the points in the trajectory
-            for j in range(1, trajectory.shape[0]):
-                rr, cc, val = line_aa(*trajectory[j-1], *trajectory[j])
+            brush = self.brush.clone()
+            for k in range(3):
+                brush[k, :, :] = colors[i, k]
+            brush[3, :, :] *= colors[i, 3]
+            brushes = brush.unsqueeze(0).expand((q.shape[0], *brush.shape))
+            
+            # Use z's to figure out scales. Anywhere that scale is <= 0, set alpha to 0
+            # (but leave scale positive to avoid nans).
+            scales = torch.clip(q[:, 2], 1E-3)
+            for k, z in enumerate(q[:, 2]):
+                if z <= 0:
+                    brushes[k, 3, :, :] = 0.
 
-                # Modify the image along the line
-                for k in range(-self.line_width, self.line_width + 1):
-                    image[rr + k, cc] = 1
+            sprite_ims = draw_sprites_at_poses(
+                brushes, poses, scales,
+                out_images.shape[2], out_images.shape[3]
+            )
+            # Pass through oil transform
+            image_pre_oil = b2p(images[i])
+            sprite_ims_oil = b2p(sprite_ims)
+        
+            alphas = 1. - sprite_ims_oil[:, 3:, :, :]  # alphas inverted in absorb space
+            inv_alphs = sprite_ims_oil[:, 3:, :, :]
+                
+            # Reduce down to one image
+            # Permute for easier alpha combo
+            image = image_pre_oil[:3, :, :]
+            scaled_sprites = sprite_ims_oil[:, :3, :, :] * alphas
+            for k in range(sprite_ims_oil.shape[0]):
+                image = image * inv_alphs[k, ...] + scaled_sprites[k, ...]
+        
+            # Save out rendered image
+            out_images[i, ...] = p2b(image)
 
-            # Add the resulting image to the tensor
-            resulting_images[i] = torch.from_numpy(image)
-
-        return resulting_images
+        return out_images
     
+
 class NeuralStrokeModel(StrokeModel):
     def __init__(self):
         super(NeuralStrokeModel, self).__init__()
