@@ -14,17 +14,17 @@ class ImagePatcher:
         '''
         self.patch_size = patch_size
 
-    def extract_patches(self, images, trajectories):
+    def extract_patches(self, images, locations):
         """
         Extract patches centered at each point in the trajectory.
 
         Parameters:
         images (Tensor): A tensor of shape (batch_size n_channels, height (y), width (x)).
-        trajectories (Tensor): A tensor of shape (batch_size, trajectory_length, 2),
+        locations (Tensor): A tensor of shape (batch_size, N_locations, 2),
                                where the last dimension represents the (x, y) coordinates.
 
         Returns:
-        patches (Tensor): A tensor of shape (batch_size, trajectory_length, n_channels, patch_size, patch_size),
+        patches (Tensor): A tensor of shape (batch_size, N_locations, n_channels, patch_size, patch_size),
                           containing the patches centered at each point in the trajectory.
         """
         # Determine the amount of padding needed on each side
@@ -37,13 +37,13 @@ class ImagePatcher:
 
         # Initialize a tensor to hold the patches
         patches = torch.zeros(
-            (images.shape[0], trajectories.shape[1], images.shape[1], self.patch_size, self.patch_size)
+            (images.shape[0], locations.shape[1], images.shape[1], self.patch_size, self.patch_size)
         )
 
-        # Loop over the images & trajectories in the batch and extract the patches
+        # Loop over the images & locations in the batch and extract the patches
         for i in range(images.shape[0]):
-            for j in range(trajectories.shape[1]):
-                x, y = trajectories[i, j].to(int)
+            for j in range(locations.shape[1]):
+                x, y = locations[i, j].to(int)
                 patches[i, j, :] = images_padded[i, :, y:y+self.patch_size, x:x+self.patch_size]
 
         return patches
