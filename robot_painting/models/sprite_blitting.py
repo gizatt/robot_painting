@@ -63,6 +63,13 @@ def convert_pose_to_matrix(pose):
     out = out.view(n, 2, 3)
     return out
 
+def compose_tf_matrix(a_T_b, b_T_c):
+    # [R t] * [R]
+    assert a_T_b.shape[0] == b_T_c.shape[0]
+    a_T_c = torch.empty(a_T_b.shape, dtype=a_T_b.dtype, device=a_T_b.device)
+    a_T_c[:, 0:2, 0:2] = torch.bmm(a_T_b[:, 0:2, 0:2], b_T_c[:, 0:2, 0:2])
+    a_T_c[:, :, 2] = torch.bmm(a_T_b[:, 0:2, 0:2], b_T_c[:, :, 2].unsqueeze(2)).squeeze(2) + a_T_b[:, :, 2]
+    return a_T_c
 
 def invert_tf_matrix(tf):
     ''' Inverts a nx2x3 affine TF matrix. '''
@@ -81,7 +88,9 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
     returns a [n x image_size_x x image_size_y batch of images] from
     rendering those sprites at those locations.
 
-    Poses are defined as offsets in pixels + angle, in theta: [x, y, theta]
+    Poses are defined as offsets in pixels + angle, in theta: [x, y, theta]. We'll
+    put the *center* of the sprite at that pose, rotated about the center by that
+    rotation, scaled from its original size by <scale>.
 
     Uses Spatial Transformer Network, heavily referencing the Pyro AIR tutorial.
     '''
@@ -92,10 +101,18 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
     sprite_rows = sprites.size(2)
     sprite_cols = sprites.size(3)
 
-    # Flip x and y, since "x" is the column dim in `affine_grid`
-    im_T_sprites = convert_pose_to_matrix(
+    # Flip x and y, since "x" is the column dim in `affine_grid`. Offset for
+    # sprite size.
+    im_T_sprite_centers = convert_pose_to_matrix(
         torch.stack([im_T_sprites[:, 1], im_T_sprites[:, 0], im_T_sprites[:, 2]], dim=1)
     )
+    # sprite_centers_T_sprite = translation of [-sprite_cols * scales, -sprite_rows * scales]
+    sprite_centers_T_sprites = convert_pose_to_matrix(
+        torch.stack([
+            scales * -sprite_cols, scales * -sprite_rows, scales * 0
+        ], dim=1)
+    )
+    im_T_sprites = compose_tf_matrices(im_T_sprite_centers, sprite_centers_T_sprites)
     # Map from 0 to pixel size to -1 to 1.
     im_T_sprites[:, 0, 2] = im_T_sprites[:, 0, 2] / (float(image_cols) / 2.) - 1.0
     im_T_sprites[:, 1, 2] = im_T_sprites[:, 1, 2] / (float(image_rows) / 2.) - 1.0
@@ -113,7 +130,6 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
     sprites_T_im[:, 1, 0:2] /= (float(sprite_rows) / float(image_rows))
 
     # Apply global sprite scaling
-    print(sprites_T_im.shape, scales.shape)
     sprites_T_im[:, 0:2, 0:3] /= scales.view(-1, 1, 1).expand(-1, 2, 3)
 
     grid = F.affine_grid(sprites_T_im, torch.Size((n, n_channels, image_rows, image_cols)), align_corners=False)
@@ -125,7 +141,7 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
 def numpy_images_to_torch(images):
     # Torch generally wants ordering [channels, x, y]
     # while numpy as has [x, y, channels]
-    if len(images.shape) == 3:
+    if isinstance(images, np.ndarray) and len(images.shape) == 3:
         return torch.Tensor(images).permute(2, 0, 1)
     else:
         return torch.stack([torch.Tensor(image).permute(2, 0, 1)
