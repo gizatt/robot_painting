@@ -63,7 +63,7 @@ def convert_pose_to_matrix(pose):
     out = out.view(n, 2, 3)
     return out
 
-def compose_tf_matrix(a_T_b, b_T_c):
+def compose_tf_matrices(a_T_b, b_T_c):
     # [R t] * [R]
     assert a_T_b.shape[0] == b_T_c.shape[0]
     a_T_c = torch.empty(a_T_b.shape, dtype=a_T_b.dtype, device=a_T_b.device)
@@ -74,12 +74,11 @@ def compose_tf_matrix(a_T_b, b_T_c):
 def invert_tf_matrix(tf):
     ''' Inverts a nx2x3 affine TF matrix. '''
     new_tf = torch.empty(tf.shape, dtype=tf.dtype, device=tf.device)
-    new_tf[:, 0:2, 0:2] = tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2)
+    new_tf[:, 0:2, 0:2] = torch.linalg.inv(tf[:, 0:2, 0:2])
     new_tf[:, :, 2] = -1.*torch.bmm(
-        tf[:, 0:2, 0:2].transpose(dim0=1, dim1=2),
+        new_tf[:, 0:2, 0:2],
         tf[:, 0:2, 2].unsqueeze(2)).squeeze(2)
     return new_tf
-
 
 def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols):
     '''
@@ -101,38 +100,35 @@ def draw_sprites_at_poses(sprites, im_T_sprites, scales, image_rows, image_cols)
     sprite_rows = sprites.size(2)
     sprite_cols = sprites.size(3)
 
+    im_unit_dims_T_im = torch.tensor([[
+        [1. / (float(image_cols) / 2.), 0., -1.],
+        [0., 1. / (float(image_rows) / 2.), -1.],
+    ]], device=sprites.device).expand(n, -1, -1)
+    sprite_unit_dims_T_sprite = torch.tensor([[
+        [1. / (float(sprite_cols) / 2.), 0., -1.],
+        [0., 1. / (float(sprite_rows) / 2.), -1.]
+    ]], device=sprites.device).expand(n, -1, -1)
+
     # Flip x and y, since "x" is the column dim in `affine_grid`. Offset for
     # sprite size.
     im_T_sprite_centers = convert_pose_to_matrix(
         torch.stack([im_T_sprites[:, 1], im_T_sprites[:, 0], im_T_sprites[:, 2]], dim=1)
     )
+    
     # sprite_centers_T_sprite = translation of [-sprite_cols * scales, -sprite_rows * scales]
     sprite_centers_T_sprites = convert_pose_to_matrix(
         torch.stack([
-            scales * -sprite_cols, scales * -sprite_rows, scales * 0
-        ], dim=1)
+            torch.full_like(scales, -sprite_cols / 2.), torch.full_like(scales, -sprite_rows / 2.), torch.full_like(scales, 0)], dim=1)
     )
+    # Apply scaling
+    sprite_centers_T_sprites[:, 0:2, 0:3] *= scales.view(-1, 1, 1).expand(-1, 2, 3)
+
     im_T_sprites = compose_tf_matrices(im_T_sprite_centers, sprite_centers_T_sprites)
-    # Map from 0 to pixel size to -1 to 1.
-    im_T_sprites[:, 0, 2] = im_T_sprites[:, 0, 2] / (float(image_cols) / 2.) - 1.0
-    im_T_sprites[:, 1, 2] = im_T_sprites[:, 1, 2] / (float(image_rows) / 2.) - 1.0
+    im_unit_dims_T_sprites = compose_tf_matrices(im_unit_dims_T_im, im_T_sprites)
+    sprites_T_im_unit_dims = invert_tf_matrix(im_unit_dims_T_sprites)
+    sprites_unit_dims_T_im_unit_dims = compose_tf_matrices(sprite_unit_dims_T_sprite, sprites_T_im_unit_dims)
 
-    sprites_T_im = invert_tf_matrix(im_T_sprites)
-    # Scale down the offset to move by pixel rather than
-    # by a factor of the half image size
-    # (A movement of "+1" moves the sprite by image_size/2 in the given
-    # dimension).
-    # X and Y are flipped here, as the "x" dim is the column dimension
-    # And scale the whole transformation by the ratio of sprite to image
-    # ratio -- the default affine_grid will fill the output image
-    # with the input image.
-    sprites_T_im[:, 0, 0:2] /= (float(sprite_cols) / float(image_cols))
-    sprites_T_im[:, 1, 0:2] /= (float(sprite_rows) / float(image_rows))
-
-    # Apply global sprite scaling
-    sprites_T_im[:, 0:2, 0:3] /= scales.view(-1, 1, 1).expand(-1, 2, 3)
-
-    grid = F.affine_grid(sprites_T_im, torch.Size((n, n_channels, image_rows, image_cols)), align_corners=False)
+    grid = F.affine_grid(sprites_unit_dims_T_im_unit_dims, torch.Size((n, n_channels, image_rows, image_cols)), align_corners=False)
     out = F.grid_sample(sprites, grid,
                         padding_mode="zeros", mode="bilinear", align_corners=False)
     return out.view(n, n_channels, image_rows, image_cols)
@@ -159,3 +155,22 @@ def torch_images_to_numpy(images):
         images_out.append(
             images[k, ...].permute(1, 2, 0).cpu().detach().numpy())
     return np.stack(images_out, axis=0)
+
+
+if __name__ == "__main__":
+    # debug for grid sample
+    out_rows = 5
+    out_cols = 7
+
+    image_to_sample = torch.arange(110).float().reshape((1, 1, 10, 11))
+
+    im_to_sample_T_im_to_produce = torch.tensor([[
+        [0.1, 0., 0.1],
+        [0., 0.1, 0.]
+    ]])
+    print("im_to_produce_T_im_to_sample: ", invert_tf_matrix(im_to_sample_T_im_to_produce))
+    grid = F.affine_grid(im_to_sample_T_im_to_produce, torch.Size((1, 1, out_rows, out_cols)), align_corners=False)
+    print(grid)
+    out = F.grid_sample(image_to_sample, grid)
+    print(out.shape)
+    

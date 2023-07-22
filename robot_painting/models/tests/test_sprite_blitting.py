@@ -26,7 +26,7 @@ def test_pose_utils():
         [-1., 0., 1.]
     ]]), atol=1E-6)
 
-    composed_tf = mut.compose_tf_matrix(tf_mat, inv_tf_mat)
+    composed_tf = mut.compose_tf_matrices(tf_mat, inv_tf_mat)
     assert torch.allclose(composed_tf, torch.tensor([[
         [1., 0., 0.],
         [0., 1., 0]

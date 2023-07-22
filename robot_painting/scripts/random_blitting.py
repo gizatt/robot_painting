@@ -49,7 +49,7 @@ if __name__ == "__main__":
     while (1):
         iter_k += 1
 
-        brush_scale = max(0.05, (0.5 / np.sqrt(iter_k)))
+        brush_scale = max(0.025, (0.5 / np.sqrt(iter_k)))
         blurred_target_image = torchvision.transforms.GaussianBlur(kernel_size=11, sigma=brush_scale * 2).forward(target_image)
 
         sprite_poses = torch.stack([

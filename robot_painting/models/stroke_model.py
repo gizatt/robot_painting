@@ -67,48 +67,45 @@ class BlittingStrokeModel(StrokeModel):
         for i in range(images.shape[0]):
             # Evaluate position and velocity at the knots of the spline
             ts = trajectories[i, 0, :]
-            print(ts)
             spline = NaturalCubicSpline(natural_cubic_spline_coeffs(ts, trajectories[i, 1:, :].T))
             q = spline.evaluate(ts)
+            print("Q: ", q)
             qd = spline.derivative(ts, order=1)
+            print("QD: ", qd)
             assert not torch.any(torch.isnan(q))
             assert not torch.any(torch.isnan(qd))
             # Use xy's to figure out brush center, and direction of velocity
             # to figure out yaw
             poses = torch.stack([
-                q[:, 0], q[:, 1], torch.atan2(qd[:, 1], qd[:, 1])
+                q[:, 0], q[:, 1], -torch.atan2(qd[:, 1], qd[:, 0])
             ], dim=1)
-
+            print("Poses: ", poses)
             brush = self.brush.clone()
             for k in range(3):
                 brush[k, :, :] = colors[i, k]
             brush[3, :, :] *= colors[i, 3]
             brushes = brush.unsqueeze(0).expand((q.shape[0], *brush.shape))
-            
-            # Use z's to figure out scales. Anywhere that scale is <= 0, set alpha to 0
-            # (but leave scale positive to avoid nans).
-            scales = torch.clip(q[:, 2], 1E-3)
-            for k, z in enumerate(q[:, 2]):
-                if z <= 0:
-                    brushes[k, 3, :, :] = 0.
 
+            scales = torch.clip(q[:, 2], 1E-3, 1.)
             sprite_ims = draw_sprites_at_poses(
                 brushes, poses, scales,
                 out_images.shape[2], out_images.shape[3]
             )
+
             # Pass through oil transform
             image_pre_oil = b2p(images[i])
             sprite_ims_oil = b2p(sprite_ims)
         
             alphas = 1. - sprite_ims_oil[:, 3:, :, :]  # alphas inverted in absorb space
             inv_alphs = sprite_ims_oil[:, 3:, :, :]
-                
+
             # Reduce down to one image
-            # Permute for easier alpha combo
             image = image_pre_oil[:3, :, :]
             scaled_sprites = sprite_ims_oil[:, :3, :, :] * alphas
-            for k in range(sprite_ims_oil.shape[0]):
-                image = image * inv_alphs[k, ...] + scaled_sprites[k, ...]
+            for k, z in enumerate(q[:, 2]):
+                # Skip those brush strokes that had no pressure.
+                if z > 0:
+                    image = image * inv_alphs[k, ...] + scaled_sprites[k, ...]
         
             # Save out rendered image
             out_images[i, ...] = p2b(image)
