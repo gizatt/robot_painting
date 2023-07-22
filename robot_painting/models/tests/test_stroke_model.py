@@ -37,12 +37,12 @@ def test_stroke_viz(show: bool = False):
 
     # Create a couple of interesting strokes.
 
-    # Straight line
+    # All trajectories must share common # of knots, I think...
+    N = 51
     trajectories = []
     colors = []
-
+    
     # Straight line
-    N = 21
     trajectories.append(
         torch.stack([
             torch.linspace(0, 10, N),
@@ -56,7 +56,6 @@ def test_stroke_viz(show: bool = False):
     ))
 
     # Circle
-    N = 21
     ts = torch.linspace(0, 10, N)
     trajectories.append(
         torch.stack([

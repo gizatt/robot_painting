@@ -69,9 +69,7 @@ class BlittingStrokeModel(StrokeModel):
             ts = trajectories[i, 0, :]
             spline = NaturalCubicSpline(natural_cubic_spline_coeffs(ts, trajectories[i, 1:, :].T))
             q = spline.evaluate(ts)
-            print("Q: ", q)
             qd = spline.derivative(ts, order=1)
-            print("QD: ", qd)
             assert not torch.any(torch.isnan(q))
             assert not torch.any(torch.isnan(qd))
             # Use xy's to figure out brush center, and direction of velocity
@@ -79,7 +77,6 @@ class BlittingStrokeModel(StrokeModel):
             poses = torch.stack([
                 q[:, 0], q[:, 1], -torch.atan2(qd[:, 1], qd[:, 0])
             ], dim=1)
-            print("Poses: ", poses)
             brush = self.brush.clone()
             for k in range(3):
                 brush[k, :, :] = colors[i, k]
