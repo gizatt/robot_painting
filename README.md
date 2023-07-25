@@ -86,9 +86,9 @@ I'd like to use an explicit MPC-like approach for this, where the method breaks 
 |      to get outputs.  (Transformer encoder?)                        |
 |                                                                     |
 |---------------------------------------------------------------------|
-                |                            |
-               \|/                          \|/
-         (Resulting image)            (Expected loss)
+                | 
+               \|/
+         (Resulting image)
 ```
 Trained on collected input/output pairs generated with random actions.
 
