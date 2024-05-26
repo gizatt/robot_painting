@@ -36,7 +36,7 @@ def make_random_spline(bounds_xy=np.array([-0.9, 0.9])) -> BSpline:
     offsets = np.stack(
         [np.cos(heading), np.sin(heading)], axis=0
     ) * distances
-    offsets[:2, 0] += STROKE_START_XY
+    offsets[:2, 0] = STROKE_START_XY # Force all strokes to start at target location
     pts = np.cumsum(offsets, axis=1).T
     if np.min(pts) <= bounds_xy[0] or np.max(pts) >= bounds_xy[1]:
       continue
@@ -152,7 +152,6 @@ def draw_brushstroke(img: np.ndarray, spline: BSpline, color: np.ndarray, N_samp
   pts = spline(np.linspace(0., 1., N_samples))
   return draw_brushstroke_from_pts(img=img, pts=pts, color=color, brush_opacity=brush_opacity, interp_type=interp_type)
 
-
 times = []
 for k in range(100):
   bgr = np.random.uniform(0., 1., size=3)
@@ -160,9 +159,7 @@ for k in range(100):
   spline = make_random_spline()
   img = draw_brushstroke(img, spline, bgr, N_samples=100, brush_opacity=0.8)
   times.append(time.time() - start)
-
-print(
-    f"First time {times[0]}, , total time after JIT {np.sum(times[1:])}, average time {np.mean(times[1:])}")
-
-cv2.imshow("image", (img*255).astype(np.uint8))
-cv2.waitKey(0)
+  cv2.imshow("image", (img*255).astype(np.uint8))
+  print(
+      f"First time {times[0]}, , total time after JIT {np.sum(times[1:])}, average time {np.mean(times[1:])}")
+  cv2.waitKey(1)
