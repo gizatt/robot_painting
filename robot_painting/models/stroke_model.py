@@ -50,11 +50,12 @@ class BlittingStrokeModel(StrokeModel):
         brush = imageio.imread(brush_path).astype(float) / 256.
         self.register_buffer("brush", numpy_images_to_torch(brush))
 
-    def forward(self, images, trajectories, colors, out_images = None):
+    def forward(self, images: torch.Tensor, coeffs: torch.Tensor, colors: torch.Tensor, ts: torch.Tensor, out_images = None):
         '''
             images: N_batch x 4 x N_rows x N_cols
-            trajectories: N_batch x 4 [t, x, y, z] x N_spline_pts spline points
+            trajectories: N_batch x spline coeffs for use in NaturalCubicSpline
             colors: N_batch x 4 brush colors [rgba]
+            ts: 
         '''
         if out_images is None:
             out_images = torch.empty_like(images)
@@ -63,27 +64,28 @@ class BlittingStrokeModel(StrokeModel):
     
         b2p, p2b = oilpaint_converters(device=images.device)
 
-        # For each image in our batch...
-        for i in range(images.shape[0]):
-            # Evaluate position and velocity at the knots of the spline
-            ts = trajectories[i, 0, :]
-            spline = NaturalCubicSpline(natural_cubic_spline_coeffs(ts, trajectories[i, 1:, :].T))
-            q = spline.evaluate(ts)
-            qd = spline.derivative(ts, order=1)
-            assert not torch.any(torch.isnan(q))
-            assert not torch.any(torch.isnan(qd))
+        # Evaluate position and velocity at the knots of the spline
+        splines = NaturalCubicSpline(coeffs)
+        q = splines.evaluate(ts)
+        qd = splines.derivative(ts, order=1)
+        assert not torch.any(torch.isnan(q))
+        assert not torch.any(torch.isnan(qd))
+
+        # Render each image in our batch. Very slow as we're making this differentible...
+        # this should just be a shader or something.
+        for i in range(images.shape[0]):                        
             # Use xy's to figure out brush center, and direction of velocity
             # to figure out yaw
             poses = torch.stack([
-                q[:, 0], q[:, 1], -torch.atan2(qd[:, 1], qd[:, 0])
+                q[i, :, 0], q[i, :, 1], -torch.atan2(qd[i, :, 1], qd[i, :, 0])
             ], dim=1)
             brush = self.brush.clone()
             for k in range(3):
                 brush[k, :, :] = colors[i, k]
             brush[3, :, :] *= colors[i, 3]
-            brushes = brush.unsqueeze(0).expand((q.shape[0], *brush.shape))
+            brushes = brush.unsqueeze(0).expand((q.shape[1], *brush.shape))
 
-            scales = torch.clip(q[:, 2], 1E-3, 1.)
+            scales = torch.clip(q[i, :, 2], 1E-3, 1.)
             sprite_ims = draw_sprites_at_poses(
                 brushes, poses, scales,
                 out_images.shape[2], out_images.shape[3]
@@ -99,7 +101,7 @@ class BlittingStrokeModel(StrokeModel):
             # Reduce down to one image
             image = image_pre_oil[:3, :, :]
             scaled_sprites = sprite_ims_oil[:, :3, :, :] * alphas
-            for k, z in enumerate(q[:, 2]):
+            for k, z in enumerate(q[i, :, 2]):
                 # Skip those brush strokes that had no pressure.
                 if z > 0:
                     image = image * inv_alphs[k, ...] + scaled_sprites[k, ...]

@@ -1,3 +1,4 @@
+import time
 import pytest
 import os
 import numpy as np
@@ -33,47 +34,53 @@ def test_stroke_viz(show: bool = False):
         brush_path=os.path.join(os.path.split(
             __file__)[0], "data", "test_brush.png")
     )
-    image = torch.ones((3, 512, 512))
+    image = torch.ones((3, 256, 256))
 
     # Create a couple of interesting strokes.
 
     # All trajectories must share common # of knots, I think...
-    N = 51
-    trajectories = []
+    coeffs = []
     colors = []
+
+    N = 10
+    ts = torch.linspace(0, 1, N)
     
     # Straight line
-    trajectories.append(
-        torch.stack([
-            torch.linspace(0, 10, N),
-            torch.linspace(100, 400, N),
-            torch.full((N,), 400),
+    pts = []
+    pts.append(torch.stack([
+            torch.linspace(50, 200, N),
+            torch.full((N,), 200),
             torch.linspace(0., 0.1, N)
-        ], axis=0)
-    )
+        ], axis=0).T)
     colors.append(torch.tensor(
         [1., 0., 0., 1.]
     ))
 
     # Circle
-    ts = torch.linspace(0, 10, N)
-    trajectories.append(
-        torch.stack([
-            ts,
-            torch.cos(ts) * 50 + 200,
-            torch.sin(ts) * 50 + 200,
-            torch.cos(ts) * 0.01 + 0.05
-        ], axis=0)
-    )
+    ts = torch.linspace(0, 1, N)
+    pts.append(torch.stack([
+            torch.cos(ts * np.pi) * 25 + 100,
+            torch.sin(ts * np.pi) * 25 + 100,
+            torch.cos(ts *  np.pi) * 0.01 + 0.05
+        ], axis=0).T)
     colors.append(torch.tensor(
         [0., 0., 1., 0.5]
     ))
 
-    out_images = model.forward(image.unsqueeze(0).repeat(len(
-        trajectories), 1, 1, 1), torch.stack(trajectories, dim=0), torch.stack(colors, dim=0))
-    total_out, _ = torch.min(out_images, dim=0)
 
-    print(total_out)
+    start = time.time()
+
+    coeffs = natural_cubic_spline_coeffs(ts, torch.stack(pts, dim=0))
+    
+    traj_gen_end = time.time()
+
+    N_ts = 100
+    ts = torch.linspace(0, 1, N_ts)
+    out_images = model.forward(image.unsqueeze(0).repeat(len(
+        colors), 1, 1, 1), coeffs, torch.stack(colors, dim=0), ts=ts)
+    total_out, _ = torch.min(out_images, dim=0)
+    end = time.time()
+    print(f"Elapsed in draw: {traj_gen_end - start} in traj gen, and {end - traj_gen_end} in rendering.")
 
     if show:
         plt.imshow(
