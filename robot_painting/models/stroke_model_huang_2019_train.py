@@ -3,6 +3,7 @@
 '''
 import cv2
 import os
+import datetime
 import cv2
 import torch
 import numpy as np
@@ -14,14 +15,14 @@ from tensorboardX import SummaryWriter
 from stroke_model_huang_2019 import Huang2019FCN
 from stroke_data_generation import draw_brushstroke
 from stroke_sampling import make_random_spline_pts, make_spline_from_pts, SplineSamplingParams
+from background_image_loader import BackgroundImageLoader
 
 import torch.optim as optim
 
 IMG_SIZE = 128 # Hardcoded by Huang 2019 stroke model.
 BRUSH_SIZE = np.array([16, 16], dtype=np.int32)  # This needs to be even
 
-def draw_stroke_from_spline_pts(spline_pts: np.ndarray, brush: np.ndarray) -> np.ndarray:
-    img = np.ones((IMG_SIZE, IMG_SIZE, 3))
+def draw_stroke_from_spline_pts(img: np.ndarray, spline_pts: np.ndarray, brush: np.ndarray) -> np.ndarray:
     spline = make_spline_from_pts(spline_pts)
     return draw_brushstroke(img, spline, color=np.array([0., 0., 0.]), N_samples=64, brush=brush, brush_opacity=1., interp_type="naive")
 
@@ -46,7 +47,8 @@ def train():
     assert use_cuda
     step = 0
 
-    writer = SummaryWriter(os.path.join(run_dir, "training_logs/"))
+    timestamp_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    writer = SummaryWriter(os.path.join(run_dir, f"training_logs/{timestamp_str}/"))
 
     def save_model():
         if use_cuda:
@@ -64,8 +66,8 @@ def train():
         net.load_state_dict(model_dict)
 
 
-    # load_weights()
-    while step < 10000:
+    load_weights()
+    while step < 10001:
         net.train()
         train_batch = []
         ground_truth = []
@@ -73,7 +75,8 @@ def train():
             spline_pts = make_random_spline_pts(sampling_parameters)
             train_batch.append(spline_pts.flatten())
             # NOTE(gizatt) Huang model is just 128x128 output, so no color channel...
-            ground_truth.append(draw_stroke_from_spline_pts(spline_pts, brush)[:, :, 0])
+            img = np.ones((IMG_SIZE, IMG_SIZE, 3))
+            ground_truth.append(draw_stroke_from_spline_pts(img, spline_pts, brush)[:, :, 0])
 
         train_batch = torch.tensor(np.array(train_batch)).float()
         ground_truth = torch.tensor(np.array(ground_truth)).float()
@@ -87,9 +90,9 @@ def train():
         loss.backward()
         optimizer.step()
         print(step, loss.item())
-        if step < 200000:
+        if step < 5000:
             lr = 1e-4
-        elif step < 400000:
+        elif step < 10000:
             lr = 1e-5
         else:
             lr = 1e-6
@@ -109,7 +112,7 @@ def train():
                 writer.add_image("train/gen{}.png".format(i), G, step)
                 GT = np.stack([GT]*3, axis=0)
                 writer.add_image("train/ground_truth{}.png".format(i), GT, step)
-        if step % 1000 == 0:
+        if step % 1000 == 0 and step > 0:
             save_model()
         step += 1
         
