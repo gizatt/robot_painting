@@ -45,7 +45,7 @@ def train():
     criterion = prioritized_loss # nn.MSELoss()
     net = Huang2019FCN(n_inputs=N_PARAMS)
     optimizer = optim.Adam(net.parameters(), lr=3e-6)
-    batch_size = 64
+    batch_size = 128
 
     use_cuda = torch.cuda.is_available()
     assert use_cuda
@@ -71,7 +71,7 @@ def train():
 
 
     load_weights()
-    while step < 20001:
+    while step < 50001:
         net.train()
         train_batch = []
         ground_truth = []
@@ -96,7 +96,7 @@ def train():
         print(step, loss.item())
         if step < 10000:
             lr = 1e-4
-        elif step < 20000:
+        elif step < 30000:
             lr = 1e-5
         else:
             lr = 1e-6
