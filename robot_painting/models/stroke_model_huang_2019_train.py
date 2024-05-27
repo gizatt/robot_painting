@@ -14,23 +14,27 @@ import torch.nn.functional as F
 from tensorboardX import SummaryWriter
 from stroke_model_huang_2019 import Huang2019FCN
 from stroke_data_generation import draw_brushstroke
-from stroke_sampling import make_random_spline_pts, make_spline_from_pts, SplineSamplingParams
+from stroke_sampling import make_random_spline_unit_parameters, make_spline_from_unit_parameter_vector, SplineSamplingParams
 from background_image_loader import BackgroundImageLoader
 
 import torch.optim as optim
 
 IMG_SIZE = 128 # Hardcoded by Huang 2019 stroke model.
-BRUSH_SIZE = np.array([16, 16], dtype=np.int32)  # This needs to be even
+BRUSH_SIZE = np.array([8, 8], dtype=np.int32)  # This needs to be even
 
-def draw_stroke_from_spline_pts(img: np.ndarray, spline_pts: np.ndarray, brush: np.ndarray) -> np.ndarray:
-    spline = make_spline_from_pts(spline_pts)
+def draw_stroke_from_spline_unit_params(img: np.ndarray, q0_unit: np.ndarray, v_unit: np.ndarray, sampling_params: SplineSamplingParams, brush: np.ndarray) -> np.ndarray:
+    spline = make_spline_from_unit_parameter_vector(q0_unit, v_unit, sampling_params)
     return draw_brushstroke(img, spline, color=np.array([0., 0., 0.]), N_samples=64, brush=brush, brush_opacity=1., interp_type="naive")
 
+def prioritized_loss(output, target):
+    weighting = 0.5 + (1. - target)
+    loss = torch.mean((output - target)**2 * weighting)
+    return loss
+
 def train():
-    sampling_parameters = SplineSamplingParams(N_SPLINE_POINTS=5)
-    N_INPUTS = sampling_parameters.N_SPLINE_POINTS * 3
-    example_spline_pts = make_random_spline_pts(sampling_parameters)
-    assert example_spline_pts.flatten().shape[0] == N_INPUTS
+    sampling_parameters = SplineSamplingParams()
+    N_KNOTS = 5
+    N_PARAMS = N_KNOTS * 3 + 2
 
     run_dir = os.path.split(__file__)[0]
     brush = imageio.imread(os.path.join(run_dir, "tests/data/test_brush.png"))
@@ -38,8 +42,8 @@ def train():
     brush = cv2.resize(brush, BRUSH_SIZE,
                     interpolation=cv2.INTER_LINEAR)
 
-    criterion = nn.MSELoss()
-    net = Huang2019FCN(n_inputs=N_INPUTS)
+    criterion = prioritized_loss # nn.MSELoss()
+    net = Huang2019FCN(n_inputs=N_PARAMS)
     optimizer = optim.Adam(net.parameters(), lr=3e-6)
     batch_size = 64
 
@@ -67,16 +71,16 @@ def train():
 
 
     load_weights()
-    while step < 10001:
+    while step < 20001:
         net.train()
         train_batch = []
         ground_truth = []
         for i in range(batch_size):
-            spline_pts = make_random_spline_pts(sampling_parameters)
-            train_batch.append(spline_pts.flatten())
+            q0_unit, v_unit = make_random_spline_unit_parameters(N_KNOTS)
+            train_batch.append( np.r_[q0_unit, v_unit.flatten()] )
             # NOTE(gizatt) Huang model is just 128x128 output, so no color channel...
             img = np.ones((IMG_SIZE, IMG_SIZE, 3))
-            ground_truth.append(draw_stroke_from_spline_pts(img, spline_pts, brush)[:, :, 0])
+            ground_truth.append(draw_stroke_from_spline_unit_params(img, q0_unit, v_unit, sampling_parameters, brush)[:, :, 0])
 
         train_batch = torch.tensor(np.array(train_batch)).float()
         ground_truth = torch.tensor(np.array(ground_truth)).float()
@@ -90,9 +94,9 @@ def train():
         loss.backward()
         optimizer.step()
         print(step, loss.item())
-        if step < 5000:
+        if step < 10000:
             lr = 1e-4
-        elif step < 10000:
+        elif step < 20000:
             lr = 1e-5
         else:
             lr = 1e-6

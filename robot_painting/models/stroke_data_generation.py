@@ -15,7 +15,7 @@ from numba import njit
 from mixbox_numba import lerp_float
 
 from oil_paint_mixing_simple import submix_power
-from stroke_sampling import make_random_spline
+from stroke_sampling import make_random_spline, SplineSamplingParams
 
 submix, b2p, p2b = submix_power(np.array([13, 3, 7.]))
 
@@ -87,7 +87,7 @@ if __name__ == "__main__":
   # Test demonstration: load up a brush and draw many paint strokes overlaid with each other.
   brush = imageio.imread("tests/data/test_brush.png")
   brush = brush[:, :, 3] / 255.
-  BRUSH_SIZE = np.array([32, 32], dtype=np.int32)  # This needs to be even
+  BRUSH_SIZE = np.array([8, 8], dtype=np.int32)  # This needs to be even
   brush = cv2.resize(brush, BRUSH_SIZE,
                     interpolation=cv2.INTER_LINEAR)
 
@@ -95,15 +95,18 @@ if __name__ == "__main__":
   IM_WIDTH = 128
   img = np.full((IM_HEIGHT, IM_WIDTH, 3), 1.)
 
+  N_KNOTS = 5
+  sampling_params = SplineSamplingParams()
 
   times = []
   for k in range(100):
     bgr = np.random.uniform(0., 1., size=3)
     start = time.time()
-    spline = make_random_spline()
+    spline = make_random_spline(N_KNOTS, sampling_params)
     img = draw_brushstroke(img, spline, bgr, N_samples=100, brush=brush, brush_opacity=0.8)
     times.append(time.time() - start)
     cv2.imshow("image", (img*255).astype(np.uint8))
     print(
         f"First time {times[0]}, , total time after JIT {np.sum(times[1:])}, average time {np.mean(times[1:])}")
-    cv2.waitKey(1)
+    cv2.waitKey(30)
+  cv2.waitKey(0)
