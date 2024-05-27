@@ -2,7 +2,8 @@
 #  MIXBOX 2.0 (c) 2022 Secret Weapons. All rights reserved.
 #  License: Creative Commons Attribution-NonCommercial 4.0
 #  Authors: Sarka Sochorova and Ondrej Jamriska
-# Modded by gizatt
+#   20250526: Modded by gizatt adding numba @njit tags,
+#     plus a few minor tweaks to make those work.
 # ==========================================================
 """
     Natural color mixing based on real pigments.
