@@ -1,1 +1,4 @@
 torchcubicspline @ git+https://github.com/patrick-kidger/torchcubicspline.git
+meshcat
+pupil-apriltags
+opencv-python
