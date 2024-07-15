@@ -8,6 +8,14 @@ import threading
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.WARN)
 
+'''
+Canvas right now is 16.5cm high, 26.75cm wide
+'''
+CANVAS_IM_WIDTH = 1000
+CANVAS_IM_HEIGHT = int(16.5 / 26.5 * CANVAS_IM_WIDTH)
+CANVAS_WIDTH_PADDING = int((1. / 26.5) * CANVAS_IM_WIDTH)
+CANVAS_HEIGHT_PADDING = int((1. / 16.5) * CANVAS_IM_HEIGHT)
+
 
 @dataclass
 class CanvasImagerOutput:
@@ -40,10 +48,10 @@ class CanvasImager:
 
     def __init__(
         self,
-        output_width: int,
-        output_height: int,
-        horizontal_padding: int = 25,
-        vertical_padding: int = 25,
+        output_width: int = CANVAS_IM_WIDTH,
+        output_height: int = CANVAS_IM_HEIGHT,
+        horizontal_padding: int = CANVAS_WIDTH_PADDING,
+        vertical_padding: int = CANVAS_HEIGHT_PADDING,
     ):
         self.output_height = output_height
         self.output_width = output_width
@@ -171,7 +179,7 @@ class CanvasImager:
 
 if __name__ == "__main__":
     logging.basicConfig()
-    imager = CanvasImager(output_width=640, output_height=414)
+    imager = CanvasImager()
     show_debug = True
 
     while 1:

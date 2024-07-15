@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import logging
 import sys
 from pathlib import Path
+from canvas_imager import CANVAS_IM_WIDTH, CANVAS_IM_HEIGHT
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
@@ -184,6 +185,9 @@ def run_calibration_on_directory(calibration_directory: str):
     def load_im(path):
         img = cv2.imread(calibration_directory / path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        print(img.shape)
+        img = cv2.resize(img, (CANVAS_IM_WIDTH, CANVAS_IM_HEIGHT))
+        print(img.shape)
         return (img > 128).astype(np.float32)
 
     im_start = load_im("im_start.png")

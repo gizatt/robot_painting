@@ -49,7 +49,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Set up imager and ensure it's working
-    imager = CanvasImager(output_width=640, output_height=414)
+    imager = CanvasImager()
     output = imager.update(include_debug_drawing=True)
     if output.rectified_canvas is None:
         raise RuntimeError(
