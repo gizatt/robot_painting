@@ -3,9 +3,10 @@ import cv2
 import numpy as np
 import logging
 from dataclasses import dataclass
+import threading
 
 LOG = logging.getLogger(__name__)
-LOG.setLevel(logging.INFO)
+LOG.setLevel(logging.WARN)
 
 
 @dataclass
@@ -57,14 +58,45 @@ class CanvasImager:
             decode_sharpening=0.25,
             debug=0,
         )
-        self.capture = cv2.VideoCapture(0)
+        self.capture = cv2.VideoCapture(0, cv2.CAP_MSMF)
+
+        self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
         # Disable autofocus.
-        # self.capture.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        self.capture.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        self.capture.set(cv2.CAP_PROP_FOCUS, 180)
+
+        for k in range(30):
+            have_image, frame = self.capture.read()
+            if have_image and np.max(frame) > 0:
+                break
+
+        # Set up thread to read camera images.
+        # See https://stackoverflow.com/questions/43665208/how-to-get-the-latest-frame-from-capture-device-camera-in-opencv
+        self.lock = threading.Lock()
+        self.t = threading.Thread(target=self._reader)
+        self.t.daemon = True
+        self.t.start()
+
+    # grab frames as soon as they are available
+    def _reader(self):
+        while True:
+            with self.lock:
+                ret = self.capture.grab()
+            if not ret:
+                LOG.error("Failed to read from image. Capture thread has died.")
+                break
+
+    # retrieve latest frame
+    def read(self):
+        with self.lock:
+            have_frame, frame = self.capture.retrieve()
+        return have_frame, frame
 
     def update(self, include_debug_drawing: bool = False) -> CanvasImagerOutput:
-        have_image, frame = self.capture.read()
+        have_image, frame = self.read()
         if not have_image:
             LOG.error("No image from webcam.")
             return CanvasImagerOutput(None, None)

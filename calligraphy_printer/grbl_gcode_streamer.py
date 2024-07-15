@@ -137,7 +137,12 @@ class GRBLGCodeStreamer:
                         "Received error, corresponding command [%s]",
                         self.sent_command_buffer[0],
                     )
-
+                if "MPos" in rec:
+                    mpos = rec.split('|')[1][5:]
+                    self.xyz = np.array([float(x) for x in mpos.split(",")])
+                if "FS" in rec:
+                    fs = rec.split('|')[2][3:]
+                    self.spindle = float(fs.replace('>', ',').split(",")[1])
             if len(self.command_queue) == 0:
                 break
 
@@ -149,14 +154,38 @@ class GRBLGCodeStreamer:
             self._write(data)
             self.sent_command_buffer.append(data)
 
+        self._write("?")
+
+    def wait_and_update(self, delay: float):
+        start_time = time.time()
+        while time.time() - start_time < delay:
+            self.update()
+            time.sleep(0.1)
+
+    def all_buffers_empty(self) -> bool:
+        return len(self.sent_command_buffer) == 0 and len(self.command_queue) == 0
+
+    def update_until_done(self, timeout: float) -> bool:
+        start_time = time.time()
+        self.update()
+        while not self.all_buffers_empty():
+            self.update()
+            time.sleep(0.1)
+            if time.time() - start_time > timeout:
+                return False
+        return True
+
+    def send_move_command(self, x: float, y: float, s: float, feed_rate: float = 6000):
+        self.send_command(f"G1 X{x} Y{y} S{s} F{feed_rate}")
+
+
 def get_servo(val):
     # val on [0, 1] to a servo speed value as an int.
     pwm_period = 1 / (62500 / 1024)
     servo_min = 0.001
     servo_max = 0.0018
-    out = ((servo_min + (servo_max - servo_min) * val) / pwm_period * 1000)
+    out = (servo_min + (servo_max - servo_min) * val) / pwm_period * 1000
     if isinstance(out, np.ndarray):
         return out.astype(int)
     else:
         return int(out)
-    

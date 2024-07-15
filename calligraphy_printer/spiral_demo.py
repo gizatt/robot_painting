@@ -38,25 +38,14 @@ def run_spiral(interface):
     print("Done")
     plt.show()
 
-def wait_and_update(interface, delay: float):
-    start_time = time.time()
-    while time.time() - start_time < delay:
-        interface.update()
-        time.sleep(0.1)
-
-def wait_until_done(interface):
-    while len(interface.sent_command_buffer) > 0 or len(interface.command_queue) > 0:
-        interface.update()
-        time.sleep(0.1)
-
 def run_stroke_lines(interface):
     interface.send_command(f"G1 X0 Y0 F3000 S{get_servo(0)}")
-    wait_until_done(interface)
+    interface.update_until_done(interface)
     
     for line in range(5):
         x = line * 10
         interface.send_command(f"G1 X{x} Y0 S{get_servo(0)} F6000")
-        wait_until_done(interface)
+        interface.update_until_done(interface)
         
         stroke_len = 100.
         for t in np.linspace(0., 1., 20):
@@ -72,10 +61,10 @@ def run_stroke_lines(interface):
             interface.send_command(f"G1 X{x} Y{y} S{get_servo(stroke_depth)} F5000")
         
         interface.send_command(f"G1 X{x} Y{y} S{get_servo(0)} F6000")
-        wait_until_done(interface)
+        interface.update_until_done(interface)
 
     interface.send_command(f"G1 X0 Y0 S0 F6000")
-    wait_until_done(interface)
+    interface.update_until_done(interface)
 
 if __name__ == "__main__":
     logging.basicConfig()
