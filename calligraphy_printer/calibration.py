@@ -233,7 +233,7 @@ def run_calibration_on_directory(calibration_directory: str):
     }
     LOG.info("Final calibration data: %s", calibration_data)
     calibration_output_path = calibration_directory / "calibration.npz"
-    np.savez(calibration_output_path, calibration_data)
+    np.savez(calibration_output_path, **calibration_data)
     LOG.info("Saved calibration to %s", calibration_output_path)
 
     plt.figure()

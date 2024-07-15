@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
+from calibration import make_homog
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
@@ -39,32 +40,35 @@ def run_spiral(interface):
     plt.show()
 
 def run_stroke_lines(interface):
-    interface.send_command(f"G1 X0 Y0 F3000 S{get_servo(0)}")
-    interface.update_until_done(interface)
-    
-    for line in range(5):
-        x = line * 10
-        interface.send_command(f"G1 X{x} Y0 S{get_servo(0)} F6000")
-        interface.update_until_done(interface)
-        
-        stroke_len = 100.
-        for t in np.linspace(0., 1., 20):
-            y = stroke_len * t
-            if t > 0.75:
-                stroke_depth = (1 - t)*4
-            elif t < 0.25:
-                stroke_depth = t*4
-            else:
-                stroke_depth = 1.0
-            stroke_depth = np.clip(stroke_depth, 0., 1.)
-            stroke_depth = 0.5 + (line + 1) * 0.1 * stroke_depth
-            interface.send_command(f"G1 X{x} Y{y} S{get_servo(stroke_depth)} F5000")
-        
-        interface.send_command(f"G1 X{x} Y{y} S{get_servo(0)} F6000")
-        interface.update_until_done(interface)
+    calib_data = np.load("calibration.npz", allow_pickle=True)
+    im_size = calib_data["im_size"]
+    robot_M_uv = calib_data["robot_M_uv"]
 
-    interface.send_command(f"G1 X0 Y0 S0 F6000")
-    interface.update_until_done(interface)
+    interface.send_command(f"G1 X0 Y0 F6000 S{get_servo(0)}")
+    interface.wait_and_update(1.0)
+
+    # In UV coords
+    # Go around outside
+    uv = np.array([
+        [0.05, 0.05, 0],
+        [0.05, 0.05, 0.7],
+        [0.95, 0.05, 0.7],
+        [0.95, 0.95, 0.7],
+        [0.05, 0.95, 0.7],
+        [0.05, 0.05, 0.7],
+        [0.05, 0.05, 0.0],
+    ]).T
+    uv[0, :] *= im_size[0]
+    uv[1, :] *= im_size[1]
+    uv[:2, :] = robot_M_uv @ make_homog(uv[:2, :])
+    uv[2, :] = get_servo(uv[2, :])
+    
+    for x, y, s in uv.T:
+        interface.send_move_command(x=x, y=y, s=s)
+    
+    interface.send_move_command(x=0, y=0, s=get_servo(0))
+    interface.update_until_done(timeout=30.)
+    LOG.info("All commands enqueued")
 
 if __name__ == "__main__":
     logging.basicConfig()
