@@ -9,7 +9,7 @@ from calibration import make_homog
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
 
-from grbl_gcode_streamer import GRBLGCodeStreamer, get_servo
+from grbl_gcode_streamer import GRBLGCodeStreamer
 
 def run_spiral(interface):
     dt = 0.05
@@ -39,34 +39,38 @@ def run_spiral(interface):
     print("Done")
     plt.show()
 
-def run_stroke_lines(interface):
+def run_z_compensation_tester(interface):
     calib_data = np.load("calibration.npz", allow_pickle=True)
     im_size = calib_data["im_size"]
     robot_M_uv = calib_data["robot_M_uv"]
 
-    interface.send_command(f"G1 X0 Y0 F6000 S{get_servo(0)}")
+    interface.send_move_command(x=0, y=0, feed_rate=6000, stroke=0)
     interface.wait_and_update(1.0)
 
     # In UV coords
     # Go around outside
-    uv = np.array([
-        [0.05, 0.05, 0],
-        [0.05, 0.05, 0.7],
-        [0.95, 0.05, 0.7],
-        [0.95, 0.95, 0.7],
-        [0.05, 0.95, 0.7],
-        [0.05, 0.05, 0.7],
-        [0.05, 0.05, 0.0],
-    ]).T
+    uv = np.empty((0, 3))
+    for radius in np.arange(0.05, 0.4, 0.05):
+
+        new_uv = np.array([
+            [-1.0, -1.0, 0],
+            [-1.0, -1.0, 0.7],
+            [1.0, -1.0, 0.7],
+            [1.0, 1.0, 0.7],
+            [-1.0, 1.0, 0.7],
+            [-1.0, -1.0, 0.7],
+            [-1.0, -1.0, 0.0],
+        ]) * np.array([radius, radius, 1.]) + np.array([0.5, 0.5, 0.])
+        uv = np.concatenate([uv, new_uv], axis=0)
+    uv = uv.T
     uv[0, :] *= im_size[0]
     uv[1, :] *= im_size[1]
     uv[:2, :] = robot_M_uv @ make_homog(uv[:2, :])
-    uv[2, :] = get_servo(uv[2, :])
-    
     for x, y, s in uv.T:
-        interface.send_move_command(x=x, y=y, s=s)
+        interface.send_move_command(x=x, y=y, stroke=s)
     
-    interface.send_move_command(x=0, y=0, s=get_servo(0))
+    interface.send_move_command(x=0, y=0, stroke=0)
+    interface.update()
     interface.update_until_done(timeout=30.)
     LOG.info("All commands enqueued")
 
@@ -84,4 +88,4 @@ if __name__ == "__main__":
     interface.send_command("M3")
 
     #run_spiral(interface)
-    run_stroke_lines(interface)
+    run_z_compensation_tester(interface)

@@ -22,6 +22,14 @@ class GRBLGCodeStreamer:
     RX_BUFFER_SIZE = 128
     BAUD_RATE = 115200
 
+    # Special-case Y droop compensation.
+    # I'm seeing around 1mm of droop at x=0, and 2mm at the middle of the x travel.
+    # The total travel of the servo is about 30mm.
+    Y_DROOP_COMPENSATION_AT_SIDE = -1. / 30.
+    Y_DROOP_COMPENSATION_AT_CENTER = -2. / 30.
+    X_MAX = 297
+    Y_MAX = 210
+
     def __init__(self, port: str, check_mode: bool = False, verbose: bool = False):
         self.verbose = verbose
         self.check_mode = check_mode
@@ -175,17 +183,28 @@ class GRBLGCodeStreamer:
                 return False
         return True
 
-    def send_move_command(self, x: float, y: float, s: float, feed_rate: float = 6000):
-        self.send_command(f"G1 X{x} Y{y} S{s} F{feed_rate}")
+    def send_move_command(self, x: float, y: float, stroke: float, feed_rate: float = 6000):
+        '''
+            Translates `stroke` to a servo command, applying droop compensation,
+            and sends command.
+        '''
+        if x < 0 or x > self.X_MAX or y < 0 or y > self.Y_MAX or stroke < 0 or stroke > 1:
+            LOG.error("Ignoring out-of-range command: %f %f %f %f", x, y, stroke, feed_rate)
+            return
+        end_proximity =  np.abs(x - self.X_MAX / 2) / (self.X_MAX / 2)
+        droop_comp_amount = (self.Y_DROOP_COMPENSATION_AT_SIDE * end_proximity + self.Y_DROOP_COMPENSATION_AT_CENTER * (1. - end_proximity))
+        LOG.info("At %f %f, using droop comp %f", x, y, droop_comp_amount)
+        stroke = stroke + y * droop_comp_amount / self.Y_MAX
+        print(self.get_servo(stroke))
+        self.send_command(f"G1 X{x} Y{y} S{self.get_servo(stroke)} F{feed_rate}")
 
-
-def get_servo(val):
-    # val on [0, 1] to a servo speed value as an int.
-    pwm_period = 1 / (62500 / 1024)
-    servo_min = 0.001
-    servo_max = 0.0018
-    out = (servo_min + (servo_max - servo_min) * val) / pwm_period * 1000
-    if isinstance(out, np.ndarray):
-        return out.astype(int)
-    else:
-        return int(out)
+    def get_servo(self, val: float):
+        # val on [0, 1] to a servo speed value as an int.
+        pwm_period = 1 / (62500 / 1024)
+        servo_min = 0.001
+        servo_max = 0.0018
+        out = (servo_min + (servo_max - servo_min) * val) / pwm_period * 1000
+        if isinstance(out, np.ndarray):
+            return out.astype(int)
+        else:
+            return int(out)

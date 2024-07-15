@@ -15,7 +15,7 @@ import shutil
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
 
-from grbl_gcode_streamer import GRBLGCodeStreamer, get_servo
+from grbl_gcode_streamer import GRBLGCodeStreamer
 from canvas_imager import CanvasImager, CanvasImagerOutput
 
 
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     interface.send_command("G90")
     interface.send_command("G92 X0 Y0")
     interface.send_command("M3")
-    interface.send_move_command(x=0, y=0, s=0)
+    interface.send_move_command(x=0, y=0, stroke=0)
     interface.update_until_done(timeout=2.0)
 
     # Now set up our output directory.
@@ -96,16 +96,16 @@ if __name__ == "__main__":
             LOG.info(f"Move to {x} {y}")
 
             # Make mark
-            interface.send_move_command(x=x, y=y, s=get_servo(0.0))
-            interface.send_move_command(x=x, y=y, s=get_servo(0.6))
+            interface.send_move_command(x=x, y=y, stroke=0.0)
+            interface.send_move_command(x=x, y=y, stroke=0.6)
             interface.update()
             while not np.allclose(interface.xyz[:2], np.array([x, y]), atol=1e-3):
                 interface.update()
             time.sleep(0.25)
             
             # Get head out of way
-            interface.send_move_command(x=x, y=y, s=get_servo(0.0))
-            interface.send_move_command(x=0, y=0, s=get_servo(0.0))
+            interface.send_move_command(x=x, y=y, stroke=0.0)
+            interface.send_move_command(x=0, y=0, stroke=0.0)
             while not np.allclose(interface.xyz[:2], np.array([0, 0]), atol=1e-3):
                 interface.update()
 
