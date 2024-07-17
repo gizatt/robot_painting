@@ -47,6 +47,7 @@ class GRBLGCodeStreamer:
         self.send_line_count = 0
         self.acknowledged_line_count = 0
         self.sent_command_buffer = []
+        self.xyz = np.full(3, np.inf)
 
         LOG.info("Initialization Grbl...")
         self.ser.write(str.encode(str(chr(24)) + "\r\n"))

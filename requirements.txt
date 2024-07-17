@@ -2,3 +2,6 @@ torchcubicspline @ git+https://github.com/patrick-kidger/torchcubicspline.git
 meshcat
 pupil-apriltags
 opencv-python
+scikit-fmm==2023.4.2
+open3d
+imageio

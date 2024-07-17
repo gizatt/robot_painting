@@ -51,7 +51,6 @@ def generate_best_run_from_start(graph, component, start_node):
     adjacency_dict = dict(graph.adjacency())
     graph_pos_dict = nx.get_node_attributes(graph, "pos")
 
-    print("Starting")
     while len(unexpanded_nodes) > 0:
         # Grab the lowest-cost unexpanded node.
         update_node = min(
@@ -96,7 +95,7 @@ def generate_best_run_from_start(graph, component, start_node):
     def sorting_function(x):
         node, path_length = x
         cost = min_cost_at_nodes[node]
-        return cost - path_length * 0.1
+        return cost - path_length * 0.5
 
     # Find node that terminates longest run
     best_run = []
@@ -126,7 +125,7 @@ def convert_masked_sd_to_strokes(masked_sd: np.ndarray, point_spacing: int = 5):
     # Use Open3D for downsampling. Pack the SD into the z dim so it gets carried through.
     pcd = open3d.geometry.PointCloud()
     pcd.points = open3d.utility.Vector3dVector(
-        np.c_[nonzeros, -masked_sd[nonzeros[:, 0], nonzeros[:, 1]]]
+        np.c_[nonzeros, masked_sd[nonzeros[:, 0], nonzeros[:, 1]]]
     )
     pcd = pcd.voxel_down_sample(voxel_size=point_spacing)
     downsampled_pts = np.asarray(pcd.points)
@@ -154,7 +153,10 @@ def convert_masked_sd_to_strokes(masked_sd: np.ndarray, point_spacing: int = 5):
     connected_components = list(nx.connected_components(graph))
     runs = []
     for component in connected_components:
-        runs += generate_best_runs_for_component(graph, component)
+        #runs += generate_best_runs_for_component(graph, component)
+        runs.append(
+            max(generate_best_runs_for_component(graph, component), key=lambda x: len(x))
+        )
 
     # Finally, convert each run into a 3xN array of [x, y, size].
     graph_pos_dict = nx.get_node_attributes(graph, "pos")
@@ -169,14 +171,14 @@ def convert_masked_sd_to_strokes(masked_sd: np.ndarray, point_spacing: int = 5):
 
 
 if __name__ == "__main__":
-    img_bgr = cv2.imread("eye.png")
+    img_bgr = cv2.imread("eevee.png")
     img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) 
     
     
     brush_width = 10.0
 
     start_time = time.time()
-    masked_sd = get_brush_stroke_masked_sd(img_gray, threshold=0.5, brush_width=10.0)
+    masked_sd = get_brush_stroke_masked_sd(img_gray, threshold=0.5, brush_width=brush_width)
     sd_time = time.time()
     strokes = convert_masked_sd_to_strokes(masked_sd, point_spacing=5)
     strokes_time = time.time()
@@ -188,6 +190,7 @@ if __name__ == "__main__":
     plt.imshow(img_gray)
     plt.subplot(3, 1, 2)
     plt.imshow(masked_sd)
+    plt.colorbar()
     plt.subplot(3, 1, 3)
     
     print([x.shape[1] for x in strokes])
