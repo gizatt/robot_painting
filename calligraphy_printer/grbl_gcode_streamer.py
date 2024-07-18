@@ -148,10 +148,18 @@ class GRBLGCodeStreamer:
                     )
                 if "MPos" in rec:
                     mpos = rec.split('|')[1][5:]
-                    self.xyz = np.array([float(x) for x in mpos.split(",")])
+                    try:
+                        self.xyz = np.array([float(x) for x in mpos.split(",")])
+                    except ValueError:
+                        LOG.error(f"Parsing error: bad mpos {mpos}")
+                        continue
                 if "FS" in rec:
                     fs = rec.split('|')[2][3:]
-                    self.spindle = float(fs.replace('>', ',').split(",")[1])
+                    try:
+                        self.spindle = float(fs.replace('>', ',').split(",")[1])
+                    except ValueError:
+                        LOG.error(f"Parsing error: bad FS {fs}")
+                        continue
             if len(self.command_queue) == 0:
                 break
 

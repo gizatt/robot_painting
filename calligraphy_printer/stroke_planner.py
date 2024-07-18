@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import skfmm
 import open3d
 import networkx as nx
-
+from matplotlib.collections import LineCollection
 
 def get_brush_stroke_masked_sd(im: np.ndarray, threshold: float, brush_width: int):
     """
@@ -53,14 +53,7 @@ def generate_best_run_from_start(graph, component, start_node):
 
     while len(unexpanded_nodes) > 0:
         # Grab the lowest-cost unexpanded node.
-        update_node = min(
-            [
-                (node, value)
-                for (node, value) in min_cost_at_nodes.items()
-                if node in unexpanded_nodes
-            ],
-            key=lambda x: x[1],
-        )[0]
+        update_node = min(unexpanded_nodes, key=lambda x: min_cost_at_nodes[x])
         unexpanded_nodes.remove(update_node)
 
         # Update min cost of its neighbors.
@@ -70,15 +63,17 @@ def generate_best_run_from_start(graph, component, start_node):
 
         this_pos = graph_pos_dict[update_node]
         if update_node not in momentum_at_nodes:
-            print(f"Execution error -- bad update node {update_node}, {len(unexpanded_nodes)} nodes left, {len(component)} total.")
+            print(f"Execution error -- bad update node {update_node}, pos {this_pos}, {len(unexpanded_nodes)} nodes left, {len(component)} total.  Node has neighbors {neighbors}")
             break
+
         this_momentum = momentum_at_nodes[update_node]
         this_cost = min_cost_at_nodes[update_node]
         this_path_length = path_lengths_at_nodes[update_node]
         vecs = [graph_pos_dict[neighbor] - this_pos for neighbor in neighbors]
         vecs = [vec / np.linalg.norm(vec) for vec in vecs]
         if np.linalg.norm(this_momentum) > 0:
-            angles = np.arccos([np.sum(vec * this_momentum) for vec in vecs])
+            inner_prods = [np.sum(vec * this_momentum) for vec in vecs]
+            angles = np.arccos(np.clip(inner_prods, -1, 1))
         else:
             angles = np.zeros(len(vecs))
 
@@ -169,34 +164,48 @@ def convert_masked_sd_to_strokes(masked_sd: np.ndarray, point_spacing: int = 5):
         runs_arrays.append(np.r_[xys, sds])
     return runs_arrays
 
+def draw_stroke(im, stroke, color):
+    for x, y, s in stroke.T:
+        cv2.circle(im, center=(int(y), int(x)), radius=round(s), color=color, thickness=-1)
 
 if __name__ == "__main__":
     img_bgr = cv2.imread("eevee.png")
     img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY) 
     
     
-    brush_width = 10.0
+    brush_width = 6.0
 
     start_time = time.time()
     masked_sd = get_brush_stroke_masked_sd(img_gray, threshold=0.5, brush_width=brush_width)
     sd_time = time.time()
-    strokes = convert_masked_sd_to_strokes(masked_sd, point_spacing=5)
+    strokes = convert_masked_sd_to_strokes(masked_sd, point_spacing=3)
     strokes_time = time.time()
 
     print(f"Took %f sec for signed distance, %f sec for stroke gen." % (sd_time-start_time, strokes_time-sd_time))
 
-    plt.figure()
-    plt.subplot(3, 1, 1)
+    plt.figure().set_size_inches(18, 6)
+    plt.subplot(1, 3, 1)
     plt.imshow(img_gray)
-    plt.subplot(3, 1, 2)
+    plt.subplot(1, 3, 2)
     plt.imshow(masked_sd)
     plt.colorbar()
-    plt.subplot(3, 1, 3)
+    ax = plt.subplot(1, 3, 3)
     
     print([x.shape[1] for x in strokes])
-    plt.imshow(img_bgr)
+    im_with_strokes_drawn = img_bgr.copy()
+
+
+    #plt.imshow(img_bgr)
     cmap = plt.get_cmap("jet")
     for k, stroke in enumerate(strokes):
-      plt.plot(stroke[1, :], stroke[0, :], c=cmap(float(k)/len(strokes)), linewidth=brush_width, alpha=0.5)
+      color = np.array(cmap(float(k)/len(strokes)))*255
+      draw_stroke(im_with_strokes_drawn, stroke, color)
+      # points = np.array([stroke[1, :].flatten(), stroke[0, :].flatten()]).T.reshape(-1,1,2)
+      # segments = np.concatenate([points[:-1],points[1:]], axis=1)
+      # lc = LineCollection(segments, linewidths=stroke[2, :] * brush_width,color=cmap(float(k) / len(strokes)), alpha=0.5)
+      # ax.add_collection(lc)
+      #plt.plot(stroke[1, :], stroke[0, :], c=cmap(float(k)/len(strokes)), linewidth=brush_width, alpha=0.5)
+      #plt.scatter(stroke[1, :], stroke[0, :], s=stroke[2, :]*brush_width, c=cmap(float(k)/len(strokes)), alpha=0.5)
+    plt.imshow(im_with_strokes_drawn)
     plt.show()
     
