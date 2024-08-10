@@ -1,5 +1,6 @@
 from pupil_apriltags import Detector, Detection
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import logging
 from dataclasses import dataclass
@@ -103,7 +104,7 @@ class CanvasImager:
             have_frame, frame = self.capture.retrieve()
         return have_frame, frame
 
-    def update(self, include_debug_drawing: bool = False) -> CanvasImagerOutput:
+    def update(self, include_debug_drawing: bool = False, whitebalance: bool = True) -> CanvasImagerOutput:
         have_image, frame = self.read()
         if not have_image:
             LOG.error("No image from webcam.")
@@ -116,13 +117,40 @@ class CanvasImager:
         tag_ids = [0, 1, 2, 3]
         corner_indices = [2, 3, 0, 1]
         detection_pts = []
+        rectified_tags = []
+        
         for tag_id, corner_index in zip(tag_ids, corner_indices, strict=True):
             if tag_id not in tags:
                 LOG.info("Tag id %d missing: have %s", tag_id, str(tags.keys()))
                 break
             tag: Detection = tags[tag_id]
             detection_pts.append(tag.corners[corner_index, :])
+
+            tag_image_size = 32
+            result_pts = np.array([[0., 0.], [0., tag_image_size], [tag_image_size, tag_image_size], [tag_image_size, 0]])
+            M = cv2.getPerspectiveTransform(
+                tag.corners.astype(np.float32), result_pts.astype(np.float32)
+            )
+            rectified_tags.append( cv2.warpPerspective(
+                frame, M, (tag_image_size, tag_image_size)
+            ))
+
+        if whitebalance and len(detection_pts) > 0:
+            # Collect white balancing pixel values from the tag images.
+            wb_pixels = []
+            for tag_image in rectified_tags:
+                tag_image_lab = cv2.cvtColor(tag_image, cv2.COLOR_BGR2LAB)
+                brightnesses = tag_image_lab[:, :, 0]
+                min_brightness_for_wb_inclusion = np.max(brightnesses) * 0.7
+                wb_pixels.append(tag_image_lab[brightnesses >= min_brightness_for_wb_inclusion, :])
+            wb_pixels = np.concatenate(wb_pixels, axis=0)
+            ab_mean = np.mean(wb_pixels[:, 1:], axis=0)
+            frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+            frame_lab[:, :, 1:] -= (ab_mean.astype(np.uint8) - 128)
+            frame = cv2.cvtColor(frame_lab, cv2.COLOR_LAB2BGR)
+
         if len(detection_pts) == 4:
+            # Grab and rectify the canvas indicated by the border points.
             detection_pts = np.stack(detection_pts, axis=0)
             result_pts = np.array(
                 [
@@ -148,6 +176,7 @@ class CanvasImager:
             rectified_canvas = cv2.warpPerspective(
                 frame, M, (self.output_width, self.output_height)
             )
+
         else:
             rectified_canvas = None
 
@@ -181,9 +210,10 @@ if __name__ == "__main__":
     logging.basicConfig()
     imager = CanvasImager()
     show_debug = True
+    whitebalance = True
 
     while 1:
-        output = imager.update(include_debug_drawing=True)
+        output = imager.update(include_debug_drawing=True, whitebalance=whitebalance)
         if show_debug and output.debug_image is not None:
             cv2.imshow("canvas", output.debug_image)
         elif not show_debug and output.rectified_canvas is not None:
@@ -194,3 +224,5 @@ if __name__ == "__main__":
             break
         elif key == ord("f"):
             show_debug = not show_debug
+        elif key == ord("w"):
+            whitebalance = not whitebalance
