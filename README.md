@@ -1,11 +1,11 @@
 # Image Painting
 
-Ultimately, I want to make my robot paint pictures. Having my computer paint them digitally would be a good start.
+Ultimately, I want to make my robot paint pictures.
 
 I'm focusing on making implementation choices that support using a 3D printer with a top-down camera and brush [brush *pen*, to start] attached to it as my "robot". That means:
 
 1) Observations are top-down images of the painting (but only taken between brushstrokes).
-2) Actions are 3D brush position and velocity, without orientation control. I'll apply driver-level XYZ bounds on brush position to prevent crashes.
+2) Actions are 3D brush position and velocity, without orientation control.
 
 ## Note on code generation
 

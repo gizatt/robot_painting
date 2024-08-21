@@ -2,7 +2,9 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Optional
 
-from scipy.interpolate import CubicHermiteSpline
+import json
+import numpy as np
+from scipy.interpolate import CubicHermiteSpline, PPoly
 import matplotlib.pyplot as plt
 
 
@@ -22,7 +24,7 @@ class SplineGenerationParams:
 def make_random_spline(
     params: SplineGenerationParams = SplineGenerationParams(),
     rng: Optional[np.random.Generator] = None,
-):
+) -> PPoly:
     """
     Produces a 3D (x-y-height) Cubic Hermite Spline with N_STEPS+1 control
     points. The first is at the origin with zero velocity and a random height
@@ -76,6 +78,26 @@ def make_random_spline(
         np.array(ts), np.stack(qs), np.stack(vs), extrapolate=False
     )
 
+
+def spline_to_json(spline: PPoly) -> str:
+    """
+    Serializes a PPoly object to a JSON string.
+    """
+    ppoly_dict = {
+        'c': spline.c.tolist(),
+        'x': spline.x.tolist(),
+    }
+    return json.dumps(ppoly_dict)
+
+
+def spline_from_json(spline_json: str) -> PPoly:
+    """
+    Deserializes a JSON string back to a PPoly object.
+    """
+    spline_dict = json.loads(spline_json)
+    c = np.array(spline_dict['c'])
+    x = np.array(spline_dict['x'])
+    return PPoly(c=c, x=x, extrapolate=False)
 
 if __name__ == "__main__":
     fig, axs = plt.subplots(2)
