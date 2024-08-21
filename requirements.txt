@@ -8,3 +8,6 @@ open3d
 imageio
 pytest
 pytest-benchmark
+pyserial
+tqdm
+ujson

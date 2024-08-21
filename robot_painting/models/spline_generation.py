@@ -1,5 +1,5 @@
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional
 
 import json
@@ -79,25 +79,25 @@ def make_random_spline(
     )
 
 
-def spline_to_json(spline: PPoly) -> str:
+def spline_to_dict(spline: PPoly) -> dict:
     """
     Serializes a PPoly object to a JSON string.
     """
     ppoly_dict = {
-        'c': spline.c.tolist(),
-        'x': spline.x.tolist(),
+        "c": spline.c.tolist(),
+        "x": spline.x.tolist(),
     }
-    return json.dumps(ppoly_dict)
+    return ppoly_dict
 
 
-def spline_from_json(spline_json: str) -> PPoly:
+def spline_from_dict(spline_dict: dict) -> PPoly:
     """
     Deserializes a JSON string back to a PPoly object.
     """
-    spline_dict = json.loads(spline_json)
-    c = np.array(spline_dict['c'])
-    x = np.array(spline_dict['x'])
+    c = np.array(spline_dict["c"])
+    x = np.array(spline_dict["x"])
     return PPoly(c=c, x=x, extrapolate=False)
+
 
 if __name__ == "__main__":
     fig, axs = plt.subplots(2)

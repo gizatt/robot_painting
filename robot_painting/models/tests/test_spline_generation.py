@@ -2,16 +2,16 @@
 Generated with help from ChatGPT 4o, 2024 Aug 20.
 """
 
+from dataclasses import fields
 import pytest
 import numpy as np
 from scipy.interpolate import CubicHermiteSpline
 from robot_painting.models.spline_generation import (
     make_random_spline,
     SplineGenerationParams,
-    spline_from_json,
-    spline_to_json,
+    spline_from_dict,
+    spline_to_dict,
 )
-import json
 import cProfile
 import io
 import pstats
@@ -74,16 +74,16 @@ def test_spline_generation_performance(benchmark):
     benchmark(make_random_spline, SplineGenerationParams(n_steps=10), rng=rng)
 
 
-def test_spline_round_trip():
+def test_spline_dict_conversions():
     """Test that serializing and then deserializing returns an equivalent object."""
     spline = make_random_spline(SplineGenerationParams(n_steps=4))
-    spline_json = spline_to_json(spline)
-    deserialized_spline = spline_from_json(spline_json)
+    spline_dict = spline_to_dict(spline)
+    deserialized_spline = spline_from_dict(spline_dict)
 
     # Ensure that the deserialized spline is equivalent to the original
     assert np.array_equal(spline.c, deserialized_spline.c)
     assert np.array_equal(spline.x, deserialized_spline.x)
-    t = np.linspace(spline.x[0]-1, spline.x[-1]+1, 10)
+    t = np.linspace(spline.x[0] - 1, spline.x[-1] + 1, 10)
     assert np.array_equal(spline(t), deserialized_spline(t), equal_nan=True)
 
 
