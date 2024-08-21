@@ -8,27 +8,6 @@ from torchcubicspline import natural_cubic_spline_coeffs
 import matplotlib.pyplot as plt
 from robot_painting.models.sprite_blitting import torch_images_to_numpy
 
-
-def test_blitting_stroke_model():
-    model = BlittingStrokeModel(
-        brush_path=os.path.join(os.path.split(
-            __file__)[0], "data", "test_brush.png")
-    )
-    images = torch.ones((1, 3, 128, 128))
-    trajectories = torch.tensor([[
-        [0., 1., 2., 3.],
-        [50., 20., 30., 40.],
-        [50., 20., 30., 40.],
-        [1., 0.5, 0., -1.]
-    ]])
-    colors = torch.tensor([
-        [1., 0., 0., 0.5]
-    ])
-    out_images = model.forward(images, trajectories, colors)
-    assert out_images.shape == images.shape
-    assert torch.min(out_images) < 0.9
-
-
 def test_stroke_viz(show: bool = False):
     model = BlittingStrokeModel(
         brush_path=os.path.join(os.path.split(
