@@ -80,5 +80,5 @@ def make_random_spline(n_knots: int, sampling_params: SplineSamplingParams) -> B
   '''
     See make_random_spline_pts. Returns a BSpline object.
   '''
-  q0, v = make_random_spline_unit_parameters()
+  q0, v = make_random_spline_unit_parameters(n_knots)
   return make_spline_from_unit_parameter_vector(q0, v, sampling_params)
