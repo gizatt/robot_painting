@@ -9,6 +9,7 @@ from scipy.interpolate import CubicHermiteSpline
 from robot_painting.models.spline_generation import (
     make_random_spline,
     SplineGenerationParams,
+    SplineAndOffset,
     spline_from_dict,
     spline_to_dict,
 )
@@ -86,6 +87,17 @@ def test_spline_dict_conversions():
     t = np.linspace(spline.x[0] - 1, spline.x[-1] + 1, 10)
     assert np.array_equal(spline(t), deserialized_spline(t), equal_nan=True)
 
+def test_spline_and_offset():
+    spline = make_random_spline(SplineGenerationParams(n_steps=4))
+    offset = np.array([1., 2., 0.])
+    spline_and_offset = SplineAndOffset(spline=spline, offset=offset)
+    xs = spline_and_offset.sample(N=100)
+    assert xs.shape == (100, 3)
+
+    data_dict = spline_and_offset.to_dict()
+    deserialized_spline_and_offset = SplineAndOffset.from_dict(data_dict)
+    xs_deserialized = deserialized_spline_and_offset.sample(N=100)
+    assert np.allclose(xs, xs_deserialized)
 
 if __name__ == "__main__":
     profile_spline_generation()

@@ -13,7 +13,7 @@ class SplineGenerationParams:
     min_move_time: float = 0.5
     max_move_time: float = 2.0
     min_move_length: float = 10
-    max_move_length: float = 50.0
+    max_move_length: float = 20.0
     max_turn_amount: float = np.pi
     min_velocity: float = 0.0
     max_velocity: float = 50.0
@@ -44,7 +44,7 @@ def make_random_spline(
     qs = [np.array([0.0, 0.0, rng.uniform(0.0, 1.0)])]
     vs = [np.zeros(3)]
 
-    heading = 0
+    heading = rng.uniform(0., 2*np.pi)
     for k in range(params.n_steps):
         dt = rng.uniform(params.min_move_time, params.max_move_time)
         ts.append(ts[-1] + dt)
@@ -98,6 +98,34 @@ def spline_from_dict(spline_dict: dict) -> PPoly:
     x = np.array(spline_dict["x"])
     return PPoly(c=c, x=x, extrapolate=False)
 
+@dataclass
+class SplineAndOffset():
+    '''
+        Representation of spline with an x and y shift.
+    '''
+    spline: PPoly
+    offset: np.ndarray # Should match dimension of PPoly.
+    
+    def sample(self, N: int) -> np.ndarray:
+        '''
+            Returns Nxspline_dim array.
+        '''
+        t = np.linspace(self.spline.x[0], self.spline.x[-1], N)
+        xs = self.spline(t)
+        return xs + self.offset
+    
+    def to_dict(self) -> dict:
+        return {
+            "spline": spline_to_dict(self.spline),
+            "offset": self.offset.tolist()
+        }
+
+    @staticmethod
+    def from_dict(data_dict: dict) -> 'SplineAndOffset':
+        return SplineAndOffset(
+            spline=spline_from_dict(data_dict["spline"]),
+            offset=np.array(data_dict["offset"])
+        )
 
 if __name__ == "__main__":
     fig, axs = plt.subplots(2)

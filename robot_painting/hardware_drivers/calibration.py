@@ -10,6 +10,8 @@
     we fit `robot_M_uv`.
 """
 
+from dataclasses import dataclass
+from typing import Tuple
 import argparse
 import cv2
 import numpy as np
@@ -17,7 +19,10 @@ import matplotlib.pyplot as plt
 import logging
 import sys
 from pathlib import Path
-from canvas_imager import CANVAS_IM_WIDTH, CANVAS_IM_HEIGHT
+from robot_painting.hardware_drivers.canvas_imager import (
+    CANVAS_IM_WIDTH,
+    CANVAS_IM_HEIGHT,
+)
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
@@ -75,6 +80,37 @@ class ImageBlobDetector:
             LOG.error(f"Detected {len(keypoints)} != 1 keypoints.")
             return None
         return np.asarray(keypoints[0].pt)
+
+
+@dataclass
+class Calibration:
+    im_size: Tuple[int]  # expected image pixel dimensions
+    robot_M_uv: np.ndarray  # 2x3
+    uv_M_robot: np.ndarray  # 2x3
+    robot_lb: np.ndarray  # [x lb, x ub]
+    robot_ub: np.ndarray  # [y lb, y ub]
+
+    @staticmethod
+    def from_file(path: str) -> "Calibration":
+        calib_data = np.load(path, allow_pickle=True)
+        im_size = calib_data["im_size"]
+        robot_M_uv = calib_data["robot_M_uv"]
+        uv_M_robot = invert_affine_tf(robot_M_uv)
+        robot_bounds = (
+            robot_M_uv @ np.array([[0.0, 0.0, 1.0], [im_size[0], im_size[1], 1.0]]).T
+        )
+        robot_lb = np.min(robot_bounds, axis=1)
+        robot_ub = np.max(robot_bounds, axis=1)
+        LOG.info(
+            f"Loaded robot calibration with im_size {im_size}, bounds {robot_lb}:{robot_ub}"
+        )
+        return Calibration(
+            im_size=im_size,
+            robot_M_uv=robot_M_uv,
+            uv_M_robot=uv_M_robot,
+            robot_lb=robot_lb,
+            robot_ub=robot_ub,
+        )
 
 
 def do_test():
@@ -228,8 +264,8 @@ def run_calibration_on_directory(calibration_directory: str):
     calibration_data = {
         "robot_M_uv": M_fit,
         "im_size": [im.shape[1], im.shape[0]],
-        "lb": M_fit @ np.array([0., 0., 1.]),
-        "ub": M_fit @ np.array([im.shape[1], im.shape[0], 1.]),
+        "lb": M_fit @ np.array([0.0, 0.0, 1.0]),
+        "ub": M_fit @ np.array([im.shape[1], im.shape[0], 1.0]),
     }
     LOG.info("Final calibration data: %s", calibration_data)
     calibration_output_path = calibration_directory / "calibration.npz"
