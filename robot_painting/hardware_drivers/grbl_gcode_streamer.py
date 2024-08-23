@@ -205,7 +205,7 @@ class GRBLGCodeStreamer:
         LOG.info("At %f %f, using droop comp %f", x, y, droop_comp_amount)
         stroke = stroke + y * droop_comp_amount / self.Y_MAX
         print(self.get_servo(stroke))
-        self.send_command(f"G1 X{x} Y{y} S{self.get_servo(stroke)} F{feed_rate}")
+        self.send_command(f"G1 X{x:0.1f} Y{y:0.1f} S{self.get_servo(stroke):0.1f} F{int(feed_rate)}")
 
     def get_servo(self, val: float):
         # val on [0, 1] to a servo speed value as an int.

@@ -13,11 +13,13 @@ class SplineGenerationParams:
     min_move_time: float = 0.5
     max_move_time: float = 2.0
     min_move_length: float = 10
-    max_move_length: float = 20.0
+    max_move_length: float = 40.0
     max_turn_amount: float = np.pi
     min_velocity: float = 0.0
     max_velocity: float = 50.0
     max_velocity_angle_from_dir: float = np.pi / 2.0
+    min_z: float = 0.0
+    max_z: float = 1.0
     n_steps: int = 2
 
 
@@ -52,7 +54,7 @@ def make_random_spline(
         dist = rng.uniform(params.min_move_length, params.max_move_length)
         if k > 0:
             heading += rng.uniform(-params.max_turn_amount, params.max_turn_amount)
-        height = rng.uniform(0.0, 1.0)
+        height = rng.uniform(params.min_z, params.max_z)
         q = np.array(
             [
                 qs[-1][0] + dist * np.cos(heading),
@@ -106,6 +108,7 @@ class SplineAndOffset():
     spline: PPoly
     offset: np.ndarray # Should match dimension of PPoly.
     
+    # Dimension will be N x Spline_dim
     def sample(self, N: int) -> np.ndarray:
         '''
             Returns Nxspline_dim array.
@@ -114,6 +117,14 @@ class SplineAndOffset():
         xs = self.spline(t)
         return xs + self.offset
     
+    def sample_derivative(self, N: int) -> np.ndarray:
+        '''
+            Returns Nxspline_dim array.
+        '''
+        t = np.linspace(self.spline.x[0], self.spline.x[-1], N)
+        dxs = self.spline.derivative()(t)
+        return dxs
+
     def to_dict(self) -> dict:
         return {
             "spline": spline_to_dict(self.spline),
