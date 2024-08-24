@@ -1,2 +1,4 @@
 .gitignore
-logs
+raw_data
+dataset*
+

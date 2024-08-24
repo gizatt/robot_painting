@@ -140,3 +140,16 @@ from subparts (sprites), and is my current sandbox.
 
 Final calibration data: {'robot_M_uv': array([[-2.47911806e-01, -2.37978766e-03,  3.07979134e+02],
        [ 9.05840222e-04, -2.33921244e-01,  1.88412235e+02]]), 'im_size': [1000, 622], 'lb': array([307.97913358, 188.41223525]), 'ub': array([58.58709963, 43.81906158])}
+
+## Candidate differentiable stroke model
+
+I have a dataset of strokes described as before/after images paired with a PPoly spline and offset translation. I want to regress:
+
+1) At the very least, a pixelwise binary mask (or probability field) of resulting color.
+
+- I could regress a stroke (binary image, to start with) binary mask, as a pixelwise binary probability output, for the whole stroke at once. But even for single strokes, the space of all strokes is vast, so this may take more data than I get get. This is the simplest option, though.
+- I could add an inductive prior that the stroke is a combination (sum? softmax?) of smaller contributions (sub-strokes) centered at some number of sample points along the stroke. (Uniform in time, going back a second or so? Or alternatively, uniform in space?) Each sub-region is conditioned on the before-image at the same patch plus the stroke value and velocity at the last N sample points. (To interpolate before the first sample point, repeat the first point but with 0 height, I guess.) (Maybe we could inject other useful conditioning here?)
+
+Domain randomization options
+- Randomly rotate every image about the middle.
+- Few points of brightness increase/decrease.
