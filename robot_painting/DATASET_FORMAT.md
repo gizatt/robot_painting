@@ -30,3 +30,6 @@ folders (generated via the above runs). When the dataset intake script is run
 (or re-run), each `info.json` is opened and any unassigned `dataset_assignments`
 are assigned uniformly at random to the desired sets (or forced to be assigned
 to the requested global dataset assignment if available).
+
+The dataset folder should also contain a `calibration.npz` folder that's valid for all data in the dataset.
+(TODO(gizatt) This could be dataset-run specific, maybe?)

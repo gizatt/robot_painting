@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
 torchcubicspline @ git+https://github.com/patrick-kidger/torchcubicspline.git
 meshcat
 pupil-apriltags
@@ -11,3 +12,6 @@ pytest-benchmark
 pyserial
 tqdm
 ujson
+torch
+torchvision
+torchaudio
