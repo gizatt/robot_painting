@@ -46,7 +46,7 @@ def make_random_spline(
     qs = [np.array([0.0, 0.0, rng.uniform(0.0, 1.0)])]
     vs = [np.zeros(3)]
 
-    heading = rng.uniform(0., 2*np.pi)
+    heading = rng.uniform(0.0, 2 * np.pi)
     for k in range(params.n_steps):
         dt = rng.uniform(params.min_move_time, params.max_move_time)
         ts.append(ts[-1] + dt)
@@ -100,43 +100,62 @@ def spline_from_dict(spline_dict: dict) -> PPoly:
     x = np.array(spline_dict["x"])
     return PPoly(c=c, x=x, extrapolate=False)
 
+
+def spline_to_vector(spline: PPoly) -> np.ndarray:
+    return np.concatenate([spline.c.flatten(), spline.x.flatten()])
+
+
+def spline_from_vector(
+    vector: np.ndarray, n_knots: int, data_dim: int, spline_order: int = 3
+) -> PPoly:
+    # Calculate the number of coefficients
+    n_coefficients = (spline_order + 1) * (n_knots - 1) * data_dim
+
+    # Extract the coefficients and knot points from the vector
+    c = vector[:n_coefficients].reshape((spline_order + 1, n_knots - 1, data_dim))
+    x = vector[n_coefficients:].reshape((n_knots,))
+
+    # Reconstruct the PPoly spline
+    spline = PPoly(c=c, x=x)
+    return spline
+
+
 @dataclass
-class SplineAndOffset():
-    '''
-        Representation of spline with an x and y shift.
-    '''
+class SplineAndOffset:
+    """
+    Representation of spline with an x and y shift.
+    """
+
     spline: PPoly
-    offset: np.ndarray # Should match dimension of PPoly.
-    
+    offset: np.ndarray  # Should match dimension of PPoly.
+
     # Dimension will be N x Spline_dim
     def sample(self, N: int) -> np.ndarray:
-        '''
-            Returns Nxspline_dim array.
-        '''
+        """
+        Returns Nxspline_dim array.
+        """
         t = np.linspace(self.spline.x[0], self.spline.x[-1], N)
         xs = self.spline(t)
         return xs + self.offset
-    
+
     def sample_derivative(self, N: int) -> np.ndarray:
-        '''
-            Returns Nxspline_dim array.
-        '''
+        """
+        Returns Nxspline_dim array.
+        """
         t = np.linspace(self.spline.x[0], self.spline.x[-1], N)
         dxs = self.spline.derivative()(t)
         return dxs
 
     def to_dict(self) -> dict:
-        return {
-            "spline": spline_to_dict(self.spline),
-            "offset": self.offset.tolist()
-        }
+        return {"spline": spline_to_dict(self.spline), "offset": self.offset.tolist()}
 
     @staticmethod
-    def from_dict(data_dict: dict) -> 'SplineAndOffset':
+    def from_dict(data_dict: dict) -> "SplineAndOffset":
         return SplineAndOffset(
             spline=spline_from_dict(data_dict["spline"]),
-            offset=np.array(data_dict["offset"])
+            offset=np.array(data_dict["offset"]),
         )
+
 
 if __name__ == "__main__":
     fig, axs = plt.subplots(2)

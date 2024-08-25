@@ -12,6 +12,8 @@ from robot_painting.models.spline_generation import (
     SplineAndOffset,
     spline_from_dict,
     spline_to_dict,
+    spline_from_vector,
+    spline_to_vector,
 )
 import cProfile
 import io
@@ -87,9 +89,10 @@ def test_spline_dict_conversions():
     t = np.linspace(spline.x[0] - 1, spline.x[-1] + 1, 10)
     assert np.array_equal(spline(t), deserialized_spline(t), equal_nan=True)
 
+
 def test_spline_and_offset():
     spline = make_random_spline(SplineGenerationParams(n_steps=4))
-    offset = np.array([1., 2., 0.])
+    offset = np.array([1.0, 2.0, 0.0])
     spline_and_offset = SplineAndOffset(spline=spline, offset=offset)
     xs = spline_and_offset.sample(N=100)
     assert xs.shape == (100, 3)
@@ -98,6 +101,23 @@ def test_spline_and_offset():
     deserialized_spline_and_offset = SplineAndOffset.from_dict(data_dict)
     xs_deserialized = deserialized_spline_and_offset.sample(N=100)
     assert np.allclose(xs, xs_deserialized)
+
+
+def test_spline_vectorization():
+    generation_params = SplineGenerationParams()
+    spline = make_random_spline(generation_params, rng=np.random.default_rng(42))
+
+    # Test vectorization.
+    vector = spline_to_vector(spline)
+    # Reconstruct from vector
+    reconstructed = spline_from_vector(
+        vector, n_knots=generation_params.n_steps + 1, data_dim=3, spline_order=3
+    )
+
+    # Check if the reconstruction matches the original
+    assert np.allclose(spline.c, reconstructed.c)
+    assert np.allclose(spline.x, reconstructed.x)
+
 
 if __name__ == "__main__":
     profile_spline_generation()
