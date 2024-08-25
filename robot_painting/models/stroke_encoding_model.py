@@ -24,12 +24,13 @@ decoder and direct-supervision pieces for training that model.
       error                                                                  
 """
 
+from typing import Iterable
+
+import lightning as L
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Iterable
-import lightning as L
-
+import torchvision
 
 class StrokeEncoder(nn.Module):
     """
@@ -42,7 +43,7 @@ class StrokeEncoder(nn.Module):
         input_dimension: int,
         encoded_image_size: torch.Size | int,
         encoded_image_channels: int,
-        fc_sizes: Iterable[int] = [512, 1024, 2048],
+        fc_sizes: Iterable[int] = [512, 1024],
     ):
         if isinstance(encoded_image_size, int):
             encoded_image_size = torch.Size([encoded_image_size, encoded_image_size])
@@ -57,7 +58,7 @@ class StrokeEncoder(nn.Module):
         super().__init__()
 
         # Grow the input to the requested total size.
-        self.fcs = []
+        self.fcs = torch.nn.ModuleList()
         last_vector_size = input_dimension
         for fc_size in fc_sizes:
             self.fcs.append(nn.Linear(last_vector_size, fc_size))
@@ -86,7 +87,7 @@ class StrokeDecoder(nn.Module):
         output_dimension: int,
         encoded_image_size: torch.Size | int,
         encoded_image_channels: int,
-        fc_sizes: Iterable[int] = [2048, 1024, 512],
+        fc_sizes: Iterable[int] = [1024, 512],
     ):
         if isinstance(encoded_image_size, int):
             encoded_image_size = torch.Size([encoded_image_size, encoded_image_size])
@@ -101,7 +102,7 @@ class StrokeDecoder(nn.Module):
         super().__init__()
 
         # Grow the input to the requested total size.
-        self.fcs = []
+        self.fcs = torch.nn.ModuleList()
         last_vector_size = self.image_n_elements
         for fc_size in fc_sizes:
             self.fcs.append(nn.Linear(last_vector_size, fc_size))
@@ -135,7 +136,7 @@ class StackedConvnets(nn.Module):
         self.N_output_channels = N_output_channels
         self.kernel_size = 3
 
-        self.convnets = []
+        self.convnets = torch.nn.ModuleList()
         last_n_channels = self.N_input_channels
         for n_channels in convnet_channels:
             self.convnets.append(
@@ -196,12 +197,12 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
         self.autoencoder_loss_weight = 1.0
         self.rendering_loss_weight = 1.0
 
-    def shared_step(self, batch, batch_idx, step_name: str):
+    def shared_step(self, batch, batch_idx, step_name: str, log_images: bool = False):
         # training_step defines the train loop.
         # it is independent of forward
         spline_params, rendered_stroke_image = batch
+
         encoded_stroke_image = self.encoder(spline_params)
-        self.log(f"{step_name}_encoded_stroke_image", encoded_stroke_image)
         reconstructed_spline_params = self.decoder(encoded_stroke_image)
         autoencoder_loss = nn.functional.mse_loss(
             reconstructed_spline_params, spline_params
@@ -219,14 +220,29 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
             self.log(f"{step_name}_rendering_loss", rendering_loss)
             total_loss += rendering_loss * self.rendering_loss_weight
 
+            if log_images and self.logger is not None:
+                N_images = min(reconstructed_stroke_image.shape[0], 9)
+
+                rendered_stroke_image_for_viz = rendered_stroke_image[:N_images]
+                grid = torchvision.utils.make_grid(rendered_stroke_image_for_viz, nrow=3)
+                self.logger.experiment.add_image(f"{step_name}_rendered_stroke_image", grid, self.current_epoch)
+                
+                reconstructed_stroke_image_for_viz = reconstructed_stroke_image[:N_images]
+                grid = torchvision.utils.make_grid(reconstructed_stroke_image_for_viz, nrow=3)
+                self.logger.experiment.add_image(f"{step_name}_reconstructed_stroke_image", grid, self.current_epoch)
+                
+
         self.log(f"{step_name}_total_loss", total_loss)
         return total_loss
 
-    def train_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx):
         return self.shared_step(batch, batch_idx, step_name="train")
 
+    def validation_step(self, batch, batch_idx):
+        return self.shared_step(batch, batch_idx, step_name="val", log_images=True)
+    
     def test_step(self, batch, batch_idx):
-        return self.shared_step(batch, batch_idx, step_name="test")
+        return self.shared_step(batch, batch_idx, step_name="test", log_images=True)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3)

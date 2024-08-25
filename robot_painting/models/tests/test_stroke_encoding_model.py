@@ -103,12 +103,12 @@ def test_autoencoder_with_rendering():
 
     batch = (spline_params, rendered_stroke_image)
 
-    # Perform a forward pass through training and test steps.
-    train_loss = model.train_step(batch, batch_idx=0)
-    test_loss = model.test_step(batch, batch_idx=0)
+    # Perform a forward pass through training and val steps.
+    train_loss = model.training_step(batch, batch_idx=0)
+    validation_loss = model.validation_step(batch, batch_idx=0)
 
     # Check that the loss is a scalar tensor
-    for loss in [train_loss, test_loss]:
+    for loss in [train_loss, validation_loss]:
         assert isinstance(loss, torch.Tensor)
         assert loss.ndim == 0
 

@@ -6,9 +6,8 @@ from robot_painting.models.stroke_dataset import StrokeRenderingDataset
 
 def test_stroke_rendering_dataset(draw: bool = False):
     latent_image_size = 128
-    dataset = StrokeRenderingDataset(latent_image_size=128)
-
     N_samples = 3
+    dataset = StrokeRenderingDataset(latent_image_size=128, batch_size=N_samples)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=N_samples)
     if draw:
         fig = plt.figure()

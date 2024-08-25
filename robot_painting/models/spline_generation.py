@@ -22,6 +22,23 @@ class SplineGenerationParams:
     max_z: float = 1.0
     n_steps: int = 2
 
+    @property
+    def n_knots(self):
+        return self.n_steps + 1
+
+    @property
+    def data_dim(self):
+        return 3
+    
+    @property
+    def spline_order(self):
+        return 3
+
+    @property
+    def spline_vectorization_length(self):
+        n_coefficients = (self.spline_order + 1) * (self.n_knots - 1) * self.data_dim
+        return n_coefficients + self.n_knots
+
 
 def make_random_spline(
     params: SplineGenerationParams = SplineGenerationParams(),

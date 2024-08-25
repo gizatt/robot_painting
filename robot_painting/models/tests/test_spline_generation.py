@@ -109,6 +109,8 @@ def test_spline_vectorization():
 
     # Test vectorization.
     vector = spline_to_vector(spline)
+    assert len(vector.shape) == 1 and vector.shape[0] == generation_params.spline_vectorization_length
+
     # Reconstruct from vector
     reconstructed = spline_from_vector(
         vector, n_knots=generation_params.n_steps + 1, data_dim=3, spline_order=3
@@ -117,6 +119,7 @@ def test_spline_vectorization():
     # Check if the reconstruction matches the original
     assert np.allclose(spline.c, reconstructed.c)
     assert np.allclose(spline.x, reconstructed.x)
+    
 
 
 if __name__ == "__main__":
