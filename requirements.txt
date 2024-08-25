@@ -1,17 +1,19 @@
 --extra-index-url https://download.pytorch.org/whl/cu124
-torchcubicspline @ git+https://github.com/patrick-kidger/torchcubicspline.git
+imageio
+lightning
 meshcat
-pupil-apriltags
-opencv-python
-scikit-fmm==2023.4.2
 numpy
 open3d
-imageio
+opencv-python
+pupil-apriltags
+pyserial
 pytest
 pytest-benchmark
-pyserial
+scikit-fmm==2023.4.2
+tensorboard
+torch
+torchaudio
+torchcubicspline @ git+https://github.com/patrick-kidger/torchcubicspline.git
+torchvision
 tqdm
 ujson
-torch
-torchvision
-torchaudio
