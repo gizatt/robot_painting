@@ -11,7 +11,7 @@ import scipy.interpolate
 import torch
 import torchvision.transforms
 import ujson as json
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 from torchvision.io import read_image
 
 import robot_painting.hardware_drivers.calibration as calibration
@@ -193,7 +193,48 @@ class StrokeDataset(Dataset):
                 cropped_before_image, cropped_after_image, action
             )
 
-        return cropped_before_image, cropped_after_image, action, pen_type
+        spline_params = torch.tensor(spline_generation.spline_to_vector(action.spline))
+        return cropped_before_image, cropped_after_image, spline_params, pen_type
+
+
+class StrokeRenderingDataset(IterableDataset):
+    """
+    Randomly generates splines and "renders" them to images.
+    """
+
+    def __init__(self, latent_image_size: int = 128):
+        self.latent_image_size = latent_image_size
+        self.spline_generation_params = spline_generation.SplineGenerationParams()
+
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        spline: spline_generation.SplineAndOffset = (
+            spline_generation.make_random_spline(self.spline_generation_params)
+        )
+
+        # Do simple rendering.
+        im = np.full(
+            (self.latent_image_size, self.latent_image_size, 1),
+            fill_value=255,
+            dtype=np.uint8,
+        )
+        N_samples = 30
+        t = np.linspace(spline.x[0], spline.x[-1], N_samples)
+        xs = spline(t)
+        xs[:, :2] += self.latent_image_size / 2.
+        for k in range(xs.shape[0] - 1):
+            im = cv2.line(
+                im,
+                xs[k, :2].astype(int),
+                xs[k + 1, :2].astype(int),
+                color=[0, 0, 0],
+                thickness=int(xs[k, 2] * 10 + 1),
+            )
+        im = torch.tensor(im.astype(np.float32) / 255.).permute([2, 0, 1])
+        spline_params = torch.tensor(spline_generation.spline_to_vector(spline))
+        return spline_params, im
 
 
 def parse_args():
