@@ -257,4 +257,7 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer=optimizer, step_size=1000, gamma=0.1
+        )
+        return [optimizer], [scheduler]
