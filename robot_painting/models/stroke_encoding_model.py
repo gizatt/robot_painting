@@ -2,26 +2,7 @@
 Model pieces for encoding a stroke from a flat vector input, and auxiliary
 decoder and direct-supervision pieces for training that model.
 
-                                                        ┌────────────────┐   
-                                                        │                │   
-                              (extra supervision)       │Rendered stroke │   
-        ┌──────────────────────────────────────────────►│      image     │   
-        │                                               │     NxNx1      │   
-        │                                               │                │   
-        │                                               └────────▲───────┘   
-        │                                                        │           
-        │                                                    CNN layers      
-        │                                                        ▲           
-        │                                               ┌────────┼───────┐   
-        │                                               │                │   
- ┌──────┼──────┐                                        │  Stroke image  │   
- │Stroke params├─────► FCN+RELU layers ────► Reshape ── ►     NxNxM      ┼   
- └──────▲──────┘                                        │                │   
-        │                                               └─────────┬──────┘   
-        │                                                         │          
-        │                                                         │          
-   Reconstruction◄─────FCN+RELU layers◄──────Reshape◄─────────────┘          
-      error                                                                  
+See `MODEL_ARCHITECTURE.md`.     
 """
 
 from typing import Iterable
@@ -170,8 +151,11 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
         encoded_image_size: int,
         encoded_image_channels: 3,
         with_stroke_rendering: bool = True,
+        lr: float = 1E-3,
     ):
         super().__init__()
+        self.save_hyperparameters()
+        self.lr = lr
         self.encoder = StrokeEncoder(
             input_dimension=stroke_parameterization_size,
             encoded_image_size=encoded_image_size,
@@ -256,8 +240,8 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
         self.log_dict(norms)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer=optimizer, step_size=1000, gamma=0.1
+            optimizer=optimizer, step_size=1500, gamma=0.25
         )
         return [optimizer], [scheduler]
