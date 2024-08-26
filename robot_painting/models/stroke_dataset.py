@@ -193,25 +193,31 @@ class StrokeDataset(Dataset):
                 cropped_before_image, cropped_after_image, action
             )
 
-        spline_params = torch.tensor(spline_generation.spline_to_vector(action.spline))
+        spline_params = torch.tensor(spline_generation.spline_to_vector(action.spline).astype(np.float32))
         return cropped_before_image, cropped_after_image, spline_params, pen_type
 
 
-class StrokeRenderingDataset(IterableDataset):
+class StrokeRenderingDataset(Dataset):
     """
     Randomly generates splines and "renders" them to images.
     """
 
-    def __init__(self, latent_image_size: int = 128):
+    def __init__(self, batch_size: int, latent_image_size: int = 128, fixed_seeding: bool = False):
         self.latent_image_size = latent_image_size
         self.spline_generation_params = spline_generation.SplineGenerationParams()
+        self.batch_size = batch_size
+        self.fixed_seeding = fixed_seeding
 
-    def __iter__(self):
-        return self
+    def __len__(self):
+        return self.batch_size
     
-    def __next__(self):
+    def __getitem__(self, idx):
+        if self.fixed_seeding:
+            rng = np.random.default_rng(idx)
+        else:
+            rng = None
         spline: spline_generation.SplineAndOffset = (
-            spline_generation.make_random_spline(self.spline_generation_params)
+            spline_generation.make_random_spline(self.spline_generation_params, rng=rng)
         )
 
         # Do simple rendering.
@@ -233,7 +239,7 @@ class StrokeRenderingDataset(IterableDataset):
                 thickness=int(xs[k, 2] * 10 + 1),
             )
         im = torch.tensor(im.astype(np.float32) / 255.).permute([2, 0, 1])
-        spline_params = torch.tensor(spline_generation.spline_to_vector(spline))
+        spline_params = torch.tensor(spline_generation.spline_to_vector(spline).astype(np.float32))
         return spline_params, im
 
 

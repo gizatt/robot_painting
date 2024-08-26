@@ -32,7 +32,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-class StrokeEncoder(nn.Module):
+
+class StrokeEncoder(nn.Sequential):
     """
     Input: `batch_size` x `input_dimension`  vector describing the stroke.
     Output: `batch_size` images of size `encoded_image_size` with `encoded_image_channels` channels.
@@ -43,7 +44,7 @@ class StrokeEncoder(nn.Module):
         input_dimension: int,
         encoded_image_size: torch.Size | int,
         encoded_image_channels: int,
-        fc_sizes: Iterable[int] = [512, 1024],
+        fc_sizes: Iterable[int] = [128, 256, 512],
     ):
         if isinstance(encoded_image_size, int):
             encoded_image_size = torch.Size([encoded_image_size, encoded_image_size])
@@ -55,28 +56,29 @@ class StrokeEncoder(nn.Module):
             * self.encoded_image_size[1]
             * self.encoded_image_channels
         )
-        super().__init__()
 
         # Grow the input to the requested total size.
-        self.fcs = torch.nn.ModuleList()
+        layers = []
         last_vector_size = input_dimension
         for fc_size in fc_sizes:
-            self.fcs.append(nn.Linear(last_vector_size, fc_size))
-            last_vector_size = fc_size
-        self.fcs.append(nn.Linear(last_vector_size, self.image_n_elements))
-
-    def forward(self, x):
-        for fc in self.fcs:
-            x = F.relu(fc(x))
-        return x.view(
-            -1,
-            self.encoded_image_channels,
-            self.encoded_image_size[0],
-            self.encoded_image_size[1],
+            layers.append(nn.Linear(last_vector_size, fc_size))
+            layers.append(nn.ReLU())
+            last_vector_size = fc_size 
+        layers.append(nn.Linear(last_vector_size, self.image_n_elements))
+        layers.append(
+            nn.Unflatten(
+                dim=1,
+                unflattened_size=(
+                    self.encoded_image_channels,
+                    self.encoded_image_size[0],
+                    self.encoded_image_size[1],
+                ),
+            )
         )
+        super().__init__(*layers)
 
 
-class StrokeDecoder(nn.Module):
+class StrokeDecoder(nn.Sequential):
     """
     Input: `batch_size` images of size `encoded_image_size` with `encoded_image_channels` channels.
     Output: `batch_size` x `input_dimension`  vector describing the stroke.
@@ -87,7 +89,7 @@ class StrokeDecoder(nn.Module):
         output_dimension: int,
         encoded_image_size: torch.Size | int,
         encoded_image_channels: int,
-        fc_sizes: Iterable[int] = [1024, 512],
+        fc_sizes: Iterable[int] = [512, 256, 128],
     ):
         if isinstance(encoded_image_size, int):
             encoded_image_size = torch.Size([encoded_image_size, encoded_image_size])
@@ -99,24 +101,22 @@ class StrokeDecoder(nn.Module):
             * self.encoded_image_size[1]
             * self.encoded_image_channels
         )
-        super().__init__()
 
         # Grow the input to the requested total size.
-        self.fcs = torch.nn.ModuleList()
+        layers = []
+        layers.append(
+            nn.Flatten()
+        )
         last_vector_size = self.image_n_elements
         for fc_size in fc_sizes:
-            self.fcs.append(nn.Linear(last_vector_size, fc_size))
+            layers.append(nn.Linear(last_vector_size, fc_size))
+            layers.append(nn.ReLU())
             last_vector_size = fc_size
-        self.fcs.append(nn.Linear(last_vector_size, output_dimension))
-
-    def forward(self, x):
-        x = x.view(-1, self.image_n_elements)
-        for fc in self.fcs:
-            x = F.relu(fc(x))
-        return x
+        layers.append(nn.Linear(last_vector_size, output_dimension))
+        super().__init__(*layers)
 
 
-class StackedConvnets(nn.Module):
+class StackedConvnets(nn.Sequential):
     """
     Input: `batch_size` images with `N_input_channels` channels.
     Output: `batch_size` images  with `N_output_channels` channels.
@@ -127,19 +127,17 @@ class StackedConvnets(nn.Module):
         N_input_channels: int,
         N_output_channels: int,
         convnet_channels: Iterable[int] = [
-            3,
+            16, 32, 16,
         ],
     ):
-        super().__init__()
-
         self.N_input_channels = N_input_channels
         self.N_output_channels = N_output_channels
-        self.kernel_size = 3
+        self.kernel_size = 1
 
-        self.convnets = torch.nn.ModuleList()
+        layers = []
         last_n_channels = self.N_input_channels
         for n_channels in convnet_channels:
-            self.convnets.append(
+            layers.append(
                 nn.Conv2d(
                     last_n_channels,
                     n_channels,
@@ -147,8 +145,9 @@ class StackedConvnets(nn.Module):
                     padding="same",
                 )
             )
+            layers.append(nn.ReLU())
             last_n_channels = n_channels
-        self.convnets.append(
+        layers.append(
             nn.Conv2d(
                 last_n_channels,
                 N_output_channels,
@@ -156,11 +155,7 @@ class StackedConvnets(nn.Module):
                 padding="same",
             )
         )
-
-    def forward(self, x):
-        for convnet in self.convnets:
-            x = F.relu(convnet(x))
-        return x
+        super().__init__(*layers)
 
 
 class StrokeSupervisedAutoEncoder(L.LightningModule):
@@ -195,7 +190,7 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
             self.encoded_image_converter = None
 
         self.autoencoder_loss_weight = 1.0
-        self.rendering_loss_weight = 1.0
+        self.rendering_loss_weight = 10.0
 
     def shared_step(self, batch, batch_idx, step_name: str, log_images: bool = False):
         # training_step defines the train loop.
@@ -214,7 +209,7 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
             reconstructed_stroke_image = self.encoded_image_converter(
                 encoded_stroke_image
             )
-            rendering_loss = nn.functional.mse_loss(
+            rendering_loss = nn.functional.binary_cross_entropy_with_logits(
                 reconstructed_stroke_image, rendered_stroke_image
             )
             self.log(f"{step_name}_rendering_loss", rendering_loss)
@@ -224,25 +219,42 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
                 N_images = min(reconstructed_stroke_image.shape[0], 9)
 
                 rendered_stroke_image_for_viz = rendered_stroke_image[:N_images]
-                grid = torchvision.utils.make_grid(rendered_stroke_image_for_viz, nrow=3)
-                self.logger.experiment.add_image(f"{step_name}_rendered_stroke_image", grid, self.current_epoch)
                 
-                reconstructed_stroke_image_for_viz = reconstructed_stroke_image[:N_images]
-                grid = torchvision.utils.make_grid(reconstructed_stroke_image_for_viz, nrow=3)
-                self.logger.experiment.add_image(f"{step_name}_reconstructed_stroke_image", grid, self.current_epoch)
-                
+                grid = torchvision.utils.make_grid(
+                    rendered_stroke_image_for_viz, nrow=3
+                )
+                self.logger.experiment.add_image(
+                    f"{step_name}_rendered_stroke_image", grid, self.current_epoch
+                )
+
+                reconstructed_stroke_image_for_viz = reconstructed_stroke_image[
+                    :N_images
+                ]
+                grid = torchvision.utils.make_grid(
+                    reconstructed_stroke_image_for_viz, nrow=3
+                )
+                self.logger.experiment.add_image(
+                    f"{step_name}_reconstructed_stroke_image", grid, self.current_epoch
+                )
 
         self.log(f"{step_name}_total_loss", total_loss)
         return total_loss
 
     def training_step(self, batch, batch_idx):
-        return self.shared_step(batch, batch_idx, step_name="train")
+        return self.shared_step(batch, batch_idx, step_name="train", log_images=True)
 
     def validation_step(self, batch, batch_idx):
         return self.shared_step(batch, batch_idx, step_name="val", log_images=True)
-    
+
     def test_step(self, batch, batch_idx):
         return self.shared_step(batch, batch_idx, step_name="test", log_images=True)
 
+    def on_before_optimizer_step(self, optimizer):
+        # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        norms = L.pytorch.utilities.grad_norm(self, norm_type=2)
+        self.log_dict(norms)
+
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-2)
+        return optimizer
