@@ -202,11 +202,17 @@ class StrokeRenderingDataset(Dataset):
     Randomly generates splines and "renders" them to images.
     """
 
-    def __init__(self, batch_size: int, latent_image_size: int = 128, fixed_seeding: bool = False):
+    def __init__(self, batch_size: int, latent_image_size: int = 128, fixed_seeding: bool = False, num_stroke_time_samples: int = 32):
         self.latent_image_size = latent_image_size
         self.spline_generation_params = spline_generation.SplineGenerationParams()
         self.batch_size = batch_size
         self.fixed_seeding = fixed_seeding
+        self.max_stroke_duration = self.spline_generation_params.max_move_time * self.spline_generation_params.n_steps
+        self.num_stroke_time_samples = num_stroke_time_samples
+
+    @property
+    def spline_vectorization_length(self):
+        return 3 * self.num_stroke_time_samples
 
     def __len__(self):
         return self.batch_size
@@ -228,6 +234,8 @@ class StrokeRenderingDataset(Dataset):
         )
         N_samples = 30
         t = np.linspace(spline.x[0], spline.x[-1], N_samples)
+        assert np.isclose(spline.x[0], 0.), "Stroke didn't start at t=0, but instead %f!" % spline.x[0]
+        assert spline.x[-1] <= self.max_stroke_duration,  "Stroke has duration > max duration! %f vs %f" % (spline.x[-1], self.max_stroke_duration)
         xs = spline(t)
         xs[:, :2] += self.latent_image_size / 2.
         for k in range(xs.shape[0] - 1):
@@ -239,7 +247,13 @@ class StrokeRenderingDataset(Dataset):
                 thickness=int(xs[k, 2] * 10 + 1),
             )
         im = torch.tensor(im.astype(np.float32) / 255.).permute([2, 0, 1])
-        spline_params = torch.tensor(spline_generation.spline_to_vector(spline).astype(np.float32))
+
+        # Convert spline to a vector of (x, y, height) tuples, and normalize them all to the image bounds.
+        t = np.linspace(0., self.max_stroke_duration, self.num_stroke_time_samples)
+        xs = spline(np.clip(t, spline.x[0], spline.x[-1]))
+        xs[:, :2] /= self.latent_image_size
+        assert not np.any(np.isnan(xs)), (t, xs)
+        spline_params = torch.tensor(xs.flatten().astype(np.float32))
         return spline_params, im
 
 

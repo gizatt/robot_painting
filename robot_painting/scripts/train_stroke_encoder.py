@@ -46,12 +46,12 @@ if __name__ == "__main__":
         default_root_dir=root_dir,
         log_every_n_steps=1,
         detect_anomaly=True,
-        gradient_clip_val=10.,
-        max_epochs=5000,
+        gradient_clip_val=1.,
+        max_epochs=2000,
         callbacks=[L.pytorch.callbacks.StochasticWeightAveraging(swa_lrs=1e-2)],
     )
     model = stroke_encoding_model.StrokeSupervisedAutoEncoder(
-        stroke_parameterization_size=stroke_generation_params.spline_vectorization_length,
+        stroke_parameterization_size=train_dataset.spline_vectorization_length,
         encoded_image_size=encoded_image_size,
         encoded_image_channels=3,
         with_stroke_rendering=True,
