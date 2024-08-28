@@ -46,16 +46,15 @@ if __name__ == "__main__":
         save_top_k=2,
         monitor="val_total_loss",
     )
-    swa_callback = L.pytorch.callbacks.StochasticWeightAveraging(swa_lrs=1e-2)
-
+    
     trainer = L.Trainer(
         logger=logger,
         default_root_dir=root_dir,
         log_every_n_steps=1,
         detect_anomaly=True,
         gradient_clip_val=1.0,
-        max_epochs=3000,
-        callbacks=[swa_callback, checkpoint_callback],
+        max_epochs=5000,
+        callbacks=[checkpoint_callback],
         enable_checkpointing=True,
     )
     model = stroke_encoding_model.StrokeSupervisedAutoEncoder(

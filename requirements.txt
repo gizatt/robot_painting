@@ -1,6 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cu124
 imageio
 lightning
+matplotlib
 meshcat
 numpy
 open3d
@@ -10,6 +11,7 @@ pyserial
 pytest
 pytest-benchmark
 scikit-fmm==2023.4.2
+scipy
 tensorboard
 torch
 torchaudio
