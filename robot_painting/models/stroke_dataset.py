@@ -2,6 +2,7 @@ import argparse
 import logging
 import pathlib
 from copy import deepcopy
+from typing import Callable
 
 import cv2
 import matplotlib.pyplot as plt
@@ -65,12 +66,41 @@ class StrokeDatasetRandomization(object):
         return before_image, after_image, action
 
 
+class SplineToSamples(object):
+    """
+    Convert a spline to a set of samples by sampling it at regular intervals and
+    normalizing the samples to the max distance the spline can be drawn.
+    """
+
+    def __init__(
+        self,
+        max_stroke_duration: float,
+        max_stroke_distance: float,
+        num_stroke_time_samples: int = 32,
+    ):
+        self.max_stroke_duration = max_stroke_duration
+        self.num_stroke_time_samples = num_stroke_time_samples
+        self.max_stroke_distance = max_stroke_distance
+
+    def __call__(self, spline: spline_generation.SplineAndOffset):
+        t = np.linspace(
+            0.0, self.max_stroke_duration, self.num_stroke_time_samples, endpoint=True
+        )
+        t = np.clip(t, a_min=spline.spline.x[0], a_max=spline.spline.x[-1])
+        return (spline.spline(t) + spline.offset) / self.max_stroke_distance
+
+    def invert(self, spline_params: np.ndarray) -> np.ndarray:
+        return spline_params * self.max_stroke_distance
+
+
 class StrokeDataset(Dataset):
 
     def __init__(
         self,
         dataset_path: str | pathlib.Path,
         dataset_assignment: str,
+        spline_transform: Callable[[spline_generation.SplineAndOffset], np.ndarray],
+        output_image_size: int = 128,
         transform=None,
         crop_halfwidth_mm: int = 64,  # Output image will be 1mm per pixel.
     ):
@@ -79,6 +109,9 @@ class StrokeDataset(Dataset):
         assert dataset_path.exists()
         self.dataset_path = dataset_path
         self.dataset_assignment = dataset_assignment
+
+        self.spline_transform = spline_transform
+        self.output_image_size = output_image_size
 
         calibration_data_path = dataset_path / "calibration.npz"
         assert calibration_data_path.exists()
@@ -89,7 +122,8 @@ class StrokeDataset(Dataset):
         self.before_image_paths = []
         self.after_image_paths = []
         self.actions = []
-        self.pen_types = []
+        self.pen_type_indices = []
+        self.pen_type_to_index = {}
 
         subdirectories = [x for x in self.dataset_path.iterdir() if x.is_dir()]
         for subdirectory in subdirectories:
@@ -123,7 +157,10 @@ class StrokeDataset(Dataset):
                         action["SplineAndOffset"]
                     )
                 )
-                self.pen_types.append(data["pen_type"])
+                pen_type = data["pen_type"]
+                if pen_type not in self.pen_type_to_index:
+                    self.pen_type_to_index[pen_type] = len(self.pen_type_to_index)
+                self.pen_type_indices.append(self.pen_type_to_index[pen_type])
 
         LOG.info(
             f"Loaded StrokeDataset::{dataset_assignment} with {len(self.actions)} entries from {dataset_path}."
@@ -137,7 +174,7 @@ class StrokeDataset(Dataset):
         before_image = cv2.imread(self.before_image_paths[idx])
         after_image = cv2.imread(self.after_image_paths[idx])
         action: spline_generation.SplineAndOffset = deepcopy(self.actions[idx])
-        pen_type = self.pen_types[idx]
+        pen_type_index = self.pen_type_indices[idx]
 
         # Crop around the stroke origin (first knot) by the desired amount.
         # Resize to the desired mm/pixel amount.
@@ -193,8 +230,19 @@ class StrokeDataset(Dataset):
                 cropped_before_image, cropped_after_image, action
             )
 
-        spline_params = torch.tensor(spline_generation.spline_to_vector(action.spline).astype(np.float32))
-        return cropped_before_image, cropped_after_image, spline_params, pen_type
+        # Resize the cropped images to the latent image size
+        resize_transform = torchvision.transforms.Resize(
+            (self.output_image_size, self.output_image_size)
+        )
+        cropped_before_image = resize_transform(cropped_before_image)
+        cropped_after_image = resize_transform(cropped_after_image)
+
+        # Convert spline to a vector of (x, y, height) tuples, normalized to the output image bound.
+        spline_params = torch.tensor(
+            self.spline_transform(action).flatten().astype(np.float32)
+        )
+
+        return cropped_before_image, cropped_after_image, spline_params, pen_type_index
 
 
 class StrokeRenderingDataset(Dataset):
@@ -202,28 +250,39 @@ class StrokeRenderingDataset(Dataset):
     Randomly generates splines and "renders" them to images.
     """
 
-    def __init__(self, batch_size: int, latent_image_size: int = 128, fixed_seeding: bool = False, num_stroke_time_samples: int = 32):
+    def __init__(
+        self,
+        batch_size: int,
+        latent_image_size: int = 128,
+        fixed_seeding: bool = False,
+        num_stroke_time_samples: int = 32,
+    ):
         self.latent_image_size = latent_image_size
         self.spline_generation_params = spline_generation.SplineGenerationParams()
+        self.spline_transform = SplineToSamples(
+            max_stroke_duration=self.spline_generation_params.max_move_time
+            * self.spline_generation_params.n_steps,
+            max_stroke_distance=self.spline_generation_params.max_move_length
+            * self.spline_generation_params.n_steps,
+            num_stroke_time_samples=num_stroke_time_samples,
+        )
         self.batch_size = batch_size
         self.fixed_seeding = fixed_seeding
-        self.max_stroke_duration = self.spline_generation_params.max_move_time * self.spline_generation_params.n_steps
-        self.num_stroke_time_samples = num_stroke_time_samples
 
     @property
     def spline_vectorization_length(self):
-        return 3 * self.num_stroke_time_samples
+        return 3 * self.spline_transform.num_stroke_time_samples
 
     def __len__(self):
         return self.batch_size
-    
+
     def __getitem__(self, idx):
         if self.fixed_seeding:
             rng = np.random.default_rng(idx)
         else:
             rng = None
-        spline: spline_generation.SplineAndOffset = (
-            spline_generation.make_random_spline(self.spline_generation_params, rng=rng)
+        spline = spline_generation.make_random_spline(
+            self.spline_generation_params, rng=rng
         )
 
         # Do simple rendering.
@@ -234,10 +293,17 @@ class StrokeRenderingDataset(Dataset):
         )
         N_samples = 30
         t = np.linspace(spline.x[0], spline.x[-1], N_samples)
-        assert np.isclose(spline.x[0], 0.), "Stroke didn't start at t=0, but instead %f!" % spline.x[0]
-        assert spline.x[-1] <= self.max_stroke_duration,  "Stroke has duration > max duration! %f vs %f" % (spline.x[-1], self.max_stroke_duration)
+        assert np.isclose(spline.x[0], 0.0), (
+            "Stroke didn't start at t=0, but instead %f!" % spline.x[0]
+        )
+        assert (
+            spline.x[-1] <= self.spline_transform.max_stroke_duration
+        ), "Stroke has duration > max duration! %f vs %f" % (
+            spline.x[-1],
+            self.spline_transform.max_stroke_duration,
+        )
         xs = spline(t)
-        xs[:, :2] += self.latent_image_size / 2.
+        xs[:, :2] += self.latent_image_size / 2.0
         for k in range(xs.shape[0] - 1):
             im = cv2.line(
                 im,
@@ -246,14 +312,16 @@ class StrokeRenderingDataset(Dataset):
                 color=[0, 0, 0],
                 thickness=int(xs[k, 2] * 10 + 1),
             )
-        im = torch.tensor(im.astype(np.float32) / 255.).permute([2, 0, 1])
+        im = torch.tensor(im.astype(np.float32) / 255.0).permute([2, 0, 1])
 
         # Convert spline to a vector of (x, y, height) tuples, and normalize them all to the image bounds.
-        t = np.linspace(0., self.max_stroke_duration, self.num_stroke_time_samples)
-        xs = spline(np.clip(t, spline.x[0], spline.x[-1]))
-        xs[:, :2] /= self.latent_image_size
-        assert not np.any(np.isnan(xs)), (t, xs)
-        spline_params = torch.tensor(xs.flatten().astype(np.float32))
+        spline_params = torch.tensor(
+            self.spline_transform(
+                spline_generation.SplineAndOffset(spline, np.zeros(3))
+            )
+            .flatten()
+            .astype(np.float32)
+        )
         return spline_params, im
 
 
@@ -269,22 +337,37 @@ def parse_args():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
+    spline_transform = SplineToSamples(
+        max_stroke_duration=5.0,
+        max_stroke_distance=100.0,
+        num_stroke_time_samples=32,
+    )
     dataset = StrokeDataset(
         args.dataset_directory,
         dataset_assignment=args.dataset_assignment,
+        spline_transform=spline_transform,
+        output_image_size=64,
+        crop_halfwidth_mm=64,
         transform=StrokeDatasetRandomization(rng=np.random.default_rng(42)),
     )
 
     fig = plt.figure()
     gs = plt.GridSpec(3, 2, figure=fig)
     for k in range(3):
-        before, after, spline_and_offset, pen_type = dataset[k]
+        before, after, spline_params, pen_type_index = dataset[k]
+        spline_params = spline_params.numpy().reshape([-1, 3])
         ax = fig.add_subplot(gs[k, 0])
         im = before.numpy().transpose([1, 2, 0])
         ax.imshow(im)
-        xs = spline_and_offset.sample(100)
-        plt.plot(xs[:, 0] + im.shape[0] / 2.0, xs[:, 1] + im.shape[1] / 2.0)
+        spline_params = spline_transform.invert(spline_params)
+        # Account for the image rescaling.
+        spline_params[:, :2] *= dataset.output_image_size / (
+            dataset.crop_halfwidth_mm * 2
+        )
+        # Center the spline on the image.
+        spline_params[:, :2] += dataset.output_image_size / 2.0
+        plt.plot(spline_params[:, 0], spline_params[:, 1])
         ax = fig.add_subplot(gs[k, 1])
         ax.imshow(after.numpy().transpose([1, 2, 0]))
-        plt.plot(xs[:, 0] + im.shape[0] / 2.0, xs[:, 1] + im.shape[1] / 2.0)
+        plt.plot(spline_params[:, 0], spline_params[:, 1])
     plt.show()

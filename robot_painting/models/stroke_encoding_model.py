@@ -177,8 +177,6 @@ class StrokeSupervisedAutoEncoder(L.LightningModule):
         self.rendering_loss_weight = 10.0
 
     def shared_step(self, batch, batch_idx, step_name: str, log_images: bool = False):
-        # training_step defines the train loop.
-        # it is independent of forward
         spline_params, rendered_stroke_image = batch
 
         encoded_stroke_image = self.encoder(spline_params)
