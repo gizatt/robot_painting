@@ -42,13 +42,13 @@ class StrokeDatasetRandomization(object):
         before_image = torchvision.transforms.functional.rotate(
             before_image,
             angle=yaw,
-            fill=(255, 255, 255),
+            fill=(1.0, 1.0, 1.0),
             interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
         )
         after_image = torchvision.transforms.functional.rotate(
             after_image,
             angle=yaw,
-            fill=(255, 255, 255),
+            fill=(1.0, 1.0, 1.0),
             interpolation=torchvision.transforms.InterpolationMode.BILINEAR,
         )
 
@@ -91,6 +91,19 @@ class SplineToSamples(object):
 
     def invert(self, spline_params: np.ndarray) -> np.ndarray:
         return spline_params * self.max_stroke_distance
+
+    @staticmethod
+    def make_from_spline_generation_params(
+        spline_generation_params: spline_generation.SplineGenerationParams,
+        num_stroke_time_samples: int = 32,
+    ):
+        return SplineToSamples(
+            max_stroke_duration=spline_generation_params.max_move_time
+            * spline_generation_params.n_steps,
+            max_stroke_distance=spline_generation_params.max_move_length
+            * spline_generation_params.n_steps,
+            num_stroke_time_samples=num_stroke_time_samples,
+        )
 
 
 class StrokeDataset(Dataset):
@@ -221,8 +234,12 @@ class StrokeDataset(Dataset):
         )
 
         # Convert to torch images. These want the channels first.
-        cropped_before_image = torch.tensor(cropped_before_image.transpose([2, 0, 1]))
-        cropped_after_image = torch.tensor(cropped_after_image.transpose([2, 0, 1]))
+        cropped_before_image = torch.tensor(
+            cropped_before_image.transpose([2, 0, 1]).astype(np.float32) / 255.0
+        )
+        cropped_after_image = torch.tensor(
+            cropped_after_image.transpose([2, 0, 1]).astype(np.float32) / 255.0
+        )
         action.offset[:] = 0.0
 
         if self.transform:
@@ -254,18 +271,16 @@ class StrokeRenderingDataset(Dataset):
         self,
         batch_size: int,
         latent_image_size: int = 128,
+        max_stroke_width_fraction: float = 0.2,
         fixed_seeding: bool = False,
         num_stroke_time_samples: int = 32,
     ):
         self.latent_image_size = latent_image_size
         self.spline_generation_params = spline_generation.SplineGenerationParams()
-        self.spline_transform = SplineToSamples(
-            max_stroke_duration=self.spline_generation_params.max_move_time
-            * self.spline_generation_params.n_steps,
-            max_stroke_distance=self.spline_generation_params.max_move_length
-            * self.spline_generation_params.n_steps,
-            num_stroke_time_samples=num_stroke_time_samples,
+        self.spline_transform = SplineToSamples.make_from_spline_generation_params(
+            self.spline_generation_params
         )
+        self.max_stroke_width_fraction = max_stroke_width_fraction
         self.batch_size = batch_size
         self.fixed_seeding = fixed_seeding
 
@@ -304,13 +319,14 @@ class StrokeRenderingDataset(Dataset):
         )
         xs = spline(t)
         xs[:, :2] += self.latent_image_size / 2.0
+        stroke_width = self.max_stroke_width_fraction * self.latent_image_size
         for k in range(xs.shape[0] - 1):
             im = cv2.line(
                 im,
                 xs[k, :2].astype(int),
                 xs[k + 1, :2].astype(int),
                 color=[0, 0, 0],
-                thickness=int(xs[k, 2] * 10 + 1),
+                thickness=int(xs[k, 2] * stroke_width + 1),
             )
         im = torch.tensor(im.astype(np.float32) / 255.0).permute([2, 0, 1])
 

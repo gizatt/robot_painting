@@ -83,7 +83,9 @@ class StrokePredictionConvnet(nn.Sequential):
         assert (
             x.size(1) == self.n_input_channels
         ), f"Expected {self.n_input_channels} channels, but got {x.size(1)}"
-        return super().forward(x)
+        prediction = super().forward(x)
+        # Skip connection.
+        return prediction + before_image
 
 
 class StrokePredictionModel(L.LightningModule):
@@ -95,13 +97,14 @@ class StrokePredictionModel(L.LightningModule):
         self,
         stroke_encoder: StrokeEncoder,
         stroke_dataset: StrokeDataset,
-        stroke_parameterization_size: int,
         pen_feature_size: int,
         image_size: int,
         encoded_image_channels: 3,
+        freeze_encoder: bool = True,
     ):
         super().__init__()
         self.stroke_encoder = stroke_encoder
+        self.freeze_encoder = freeze_encoder
         self.pen_embedding = nn.Embedding(
             num_embeddings=len(stroke_dataset.pen_type_to_index),
             embedding_dim=pen_feature_size,
@@ -114,29 +117,41 @@ class StrokePredictionModel(L.LightningModule):
 
     def shared_step(self, batch, batch_idx, step_name: str, log_images: bool = False):
         before_image, after_image, spline_params, pen_type_index = batch
-        encoded_stroke_image = self.encoder(spline_params)
+        encoded_stroke_image = self.stroke_encoder(spline_params)
         pen_embedding = self.pen_embedding(pen_type_index)
         predicted_after_image = self.prediction_model(
             encoded_stroke_image, before_image, pen_embedding
         )
+        difference_images = (torch.norm(after_image - before_image, dim=1, keepdim=True) > 0.05).float()
+        weight_scaling = difference_images * 100. + 1.
 
-        reconstruction_loss = nn.functional.mse_loss(predicted_after_image, after_image)
+        error_image = (predicted_after_image - after_image)*weight_scaling
+        reconstruction_loss = nn.functional.mse_loss(error_image, torch.zeros_like(after_image))
         self.log(f"{step_name}_reconstruction_loss", reconstruction_loss)
 
         if log_images and self.logger is not None:
-            N_images = min(predicted_after_image.shape[0], 9)
+            N_images = min(predicted_after_image.shape[0], 2)
 
-            predicted_after_image_for_viz = predicted_after_image[:N_images]
-
-            grid = torchvision.utils.make_grid(predicted_after_image_for_viz, nrow=3)
+            ims = []
+            for k in range(N_images):
+                ims.append(before_image[k])
+                ims.append(predicted_after_image[k])
+                ims.append(difference_images[k].repeat(3, 1, 1))
+                ims.append(encoded_stroke_image[k])
+            grid = torchvision.utils.make_grid(ims, nrow=4)
             self.logger.experiment.add_image(
-                f"{step_name}_predicted_after_image", grid, self.current_epoch
+                f"{step_name}_predicted", grid, self.current_epoch
             )
 
-            after_image_for_viz = after_image[:N_images]
-            grid = torchvision.utils.make_grid(after_image_for_viz, nrow=3)
+            ims = []
+            for k in range(N_images):
+                ims.append(before_image[k])
+                ims.append(after_image[k])
+                ims.append(torch.abs(after_image[k] - before_image[k]) * 2.0)
+                ims.append(difference_images[k].repeat(3, 1, 1))
+            grid = torchvision.utils.make_grid(ims, nrow=4)
             self.logger.experiment.add_image(
-                f"{step_name}_after_image", grid, self.current_epoch
+                f"{step_name}_ground_truth", grid, self.current_epoch
             )
 
         return reconstruction_loss
@@ -157,7 +172,12 @@ class StrokePredictionModel(L.LightningModule):
         self.log_dict(norms)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        parameters = list(self.pen_embedding.parameters()) + list(
+            self.prediction_model.parameters()
+        )
+        if not self.freeze_encoder:
+            parameters += list(self.stroke_encoder.parameters())
+        optimizer = torch.optim.Adam(parameters, lr=1e-3)
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer=optimizer, step_size=1000, gamma=0.1
         )

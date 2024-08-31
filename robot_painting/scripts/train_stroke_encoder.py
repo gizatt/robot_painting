@@ -12,6 +12,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("root_dir", type=str)
     parser.add_argument("--batch-size", default=256)
+    parser.add_argument("--encoded-image-size", default=128)
+    parser.add_argument("--encoded-image-channels", default=3)
     return parser.parse_args()
 
 
@@ -19,8 +21,8 @@ if __name__ == "__main__":
     args = parse_args()
 
     stroke_generation_params = spline_generation.SplineGenerationParams()
-    encoded_image_size = 32
-    encoded_image_channels = 3
+    encoded_image_size = args.encoded_image_size
+    encoded_image_channels = args.encoded_image_channels
     train_dataset = stroke_dataset.StrokeRenderingDataset(
         latent_image_size=encoded_image_size,
         batch_size=args.batch_size,
